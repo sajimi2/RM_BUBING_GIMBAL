@@ -1,0 +1,270 @@
+#include "main.h"
+#include "can.h"
+#include "gpio.h"
+#include "CAN_recieve_send.h"
+#include "robot_total_mode.h"
+#include "INS_task.h"	
+#include "remote_control.h"
+#include "gimbal_task.h"
+//#include "nucCommu.h"
+#include "user_lib.h"
+#include "pid.h"
+#include "Robot_Information.h"
+#include <string.h>
+
+extern CAN_HandleTypeDef hcan1;
+extern CAN_HandleTypeDef hcan2;
+
+//用于存放所有信息。提供函数接口供外界使用
+static motor_measure_t motor_chassis[7];//四个底盘3508，一个拨弹，一个yaw，一个pitch
+static motor_measure_t motor_shoot[2];
+
+static CAN_TxHeaderTypeDef  gimbal_tx_message;
+static uint8_t              gimbal_can_send_data[8];
+
+static CAN_TxHeaderTypeDef  shoot_tx_message;
+static uint8_t              shoot_can_send_data[8];
+
+/**
+  * @brief          hal库CAN回调函数,接收电机数据
+  * @param[in]      hcan:CAN句柄指针
+  * @retval         none
+  */
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//收取回调，理论上云台c板不会管底盘电机的数据的，应该收拨弹和yaw的数据
+{
+    CAN_RxHeaderTypeDef rx_header;
+    uint8_t rx_data[8];
+
+    HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data);
+
+    switch (rx_header.StdId)
+    {
+        case CAN_3508_M1_ID:
+        case CAN_3508_M2_ID:
+        case CAN_3508_M3_ID:
+        case CAN_3508_M4_ID:
+        case CAN_YAW_MOTOR_ID:
+        case CAN_PIT_MOTOR_ID:
+        case CAN_TRIGGER_MOTOR_ID:
+		{
+			static uint8_t i = 0;
+			i = rx_header.StdId - CAN_3508_M1_ID;
+			if((hcan==&SHOOT_CAN)&&(i==0||i==1))
+			{
+				get_motor_measure(&motor_shoot[i],rx_data);//摩擦轮状态
+				break;
+			}		
+			get_motor_measure(&motor_chassis[i], rx_data);//一个拨弹，一个yaw，一个pitch
+			break;
+		}
+		case 0x004://裁判系统发的东西，先不管
+		{
+//			typedef union
+//				{
+//					can_send_referee_s data_s;
+//					uint8_t data_uint8_referee[sizeof(can_send_referee_s)];
+//				}data_u_referee;
+//				data_u_referee data_0;
+//				for(int i=0;i<sizeof(can_send_referee_s);i++){
+//					data_0.data_uint8_referee[i]=rx_data[i];
+//				}
+//				gimbal_rx_referee.shootspeed=data_0.data_s.shootspeed;
+//				gimbal_rx_referee.robot_id=data_0.data_s.robot_id;
+			//获取射速
+				break;
+		}
+        default:
+        {
+            break;
+        }
+    }
+}
+/**
+  * @brief          发送云台电机控制电流(0x205,0x206,0x207,0x208)
+  * @param[in]      yaw: (0x205) 6020电机控制电流, 范围 [-30000,30000]
+  * @param[in]      pitch: (0x206) 6020电机控制电流, 范围 [-30000,30000]
+  * @param[in]      shoot: (0x207) 2006电机控制电流, 范围 [-10000,10000]
+  * @param[in]      rev: (0x208) 保留，电机控制电流
+  * @retval         none
+  */
+void CAN_cmd_gimbal(int16_t yaw, int16_t pitch, int16_t shoot, int16_t rev)
+{
+    uint32_t send_mail_box;
+    gimbal_tx_message.StdId = CAN_GIMBAL_ALL_ID;
+    gimbal_tx_message.IDE = CAN_ID_STD;
+    gimbal_tx_message.RTR = CAN_RTR_DATA;
+    gimbal_tx_message.DLC = 0x08;
+    gimbal_can_send_data[0] = (yaw >> 8);
+    gimbal_can_send_data[1] = yaw;
+    gimbal_can_send_data[2] = (pitch >> 8);
+    gimbal_can_send_data[3] = pitch;
+    gimbal_can_send_data[4] = (shoot >> 8);
+    gimbal_can_send_data[5] = shoot;
+    gimbal_can_send_data[6] = (rev >> 8);
+    gimbal_can_send_data[7] = rev;
+    HAL_CAN_AddTxMessage(&GIMBAL_CAN, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
+}
+void CAN_cmd_yaw(int16_t yaw)
+{
+    uint32_t send_mail_box;
+    gimbal_tx_message.StdId = CAN_GIMBAL_ALL_ID;
+    gimbal_tx_message.IDE = CAN_ID_STD;
+    gimbal_tx_message.RTR = CAN_RTR_DATA;
+    gimbal_tx_message.DLC = 0x08;
+    gimbal_can_send_data[0] = (yaw >> 8);
+    gimbal_can_send_data[1] = yaw;
+    gimbal_can_send_data[2] = 0;
+    gimbal_can_send_data[3] = 0;
+    gimbal_can_send_data[4] = 0;
+    gimbal_can_send_data[5] = 0;
+    gimbal_can_send_data[6] = 0;
+    gimbal_can_send_data[7] = 0;
+    HAL_CAN_AddTxMessage(&CHASSIS_CAN, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
+}
+static const RC_ctrl_t *rc_chassis;
+
+static CAN_TxHeaderTypeDef  can1_tx_channel_message;
+static CAN_TxHeaderTypeDef  can1_tx_message;//yaw轴的数据也是靠发底盘的can1去底盘c板
+
+static uint8_t can1_send_data[8];		//发送yaw轴电机的编码器完成小陀螺
+//static uint8_t can1_send_data_channel[8];
+//static uint8_t can1_send_data_nuc_yaw[8];
+
+//这个包发yaw控制的相关信息can1，云台的ins读取偏航角
+typedef struct
+{
+	fp32 yaw;
+	fp32 nuc_yaw;
+}can_send_data_s;
+void CAN1_send_yaw()
+{
+	uint32_t send_mail_box;
+	typedef union
+	{
+		can_send_data_s data;
+		uint8_t data_uint8[sizeof(can_send_data_s)];
+	}can_send_data_u;
+	can_send_data_u data_u;
+	
+	data_u.data.yaw=get_INS()->Yaw;
+	
+	for(int i = 0;i < sizeof(can_send_data_s);i++)
+	{
+		can1_send_data[i] = data_u.data_uint8[i];
+	}
+	
+    can1_tx_message.StdId = 0x002;
+    can1_tx_message.IDE = CAN_ID_STD;
+    can1_tx_message.RTR = CAN_RTR_DATA;
+    can1_tx_message.DLC = 0x08;
+
+	HAL_CAN_AddTxMessage(&hcan1, &can1_tx_message, can1_send_data, &send_mail_box);
+}
+
+//这个通道发送底盘控制量
+typedef struct
+{
+	int16_t channel_2;
+	int16_t channel_3;
+	enum RobotState_e mode;
+}can_send_encode_data_s;
+static const enum RobotState_e *robotMode;
+void CAN1_send_channel()
+{
+    uint32_t send_mail_box;
+    
+    typedef union {
+        can_send_encode_data_s data;
+        uint8_t data_1[8];
+    } can_send_data_channel_u;
+    
+    can_send_data_channel_u data_u;
+    memset(&data_u, 0, sizeof(data_u));
+    
+    // 获取遥控数据
+    rc_chassis = get_remote_control_point();
+    data_u.data.mode      = *robotMode;
+    data_u.data.channel_2 = rc_chassis->rc.ch[2];
+    data_u.data.channel_3 = rc_chassis->rc.ch[3];
+    
+    can1_tx_channel_message.StdId = 0x003;
+    can1_tx_channel_message.IDE = CAN_ID_STD;
+    can1_tx_channel_message.RTR = CAN_RTR_DATA;
+    can1_tx_channel_message.DLC = 0x08;
+    
+    // 发送CAN数据
+    HAL_CAN_AddTxMessage(&hcan1, &can1_tx_channel_message, data_u.data_1, &send_mail_box);
+}
+
+//摩擦轮控制
+void CAN_cmd_shoot(int16_t motor5, int16_t motor6)
+{
+    uint32_t send_mail_box;
+    shoot_tx_message.StdId = CAN_SHOOT_ALL_ID;
+    shoot_tx_message.IDE = CAN_ID_STD;
+    shoot_tx_message.RTR = CAN_RTR_DATA;
+    shoot_tx_message.DLC = 0x08;
+    shoot_can_send_data[0] = (motor5 >> 8);
+    shoot_can_send_data[1] = motor5;
+    shoot_can_send_data[2] = (motor6 >> 8);
+    shoot_can_send_data[3] = motor6;
+    shoot_can_send_data[4] = 0;
+    shoot_can_send_data[5] = 0;
+    shoot_can_send_data[6] = 0;
+    shoot_can_send_data[7] = 0;
+    HAL_CAN_AddTxMessage(&SHOOT_CAN, &shoot_tx_message, shoot_can_send_data, &send_mail_box);
+}
+
+//const can_send_referee_s* get_refree_point()
+//{
+//		return &gimbal_rx_referee;
+//}
+
+/**
+  * @brief          返回yaw 6020电机数据指针
+  * @param[in]      none
+  * @retval         电机数据指针
+  */
+const motor_measure_t *get_yaw_gimbal_motor_measure_point(void)
+{
+    return &motor_chassis[4];
+}
+/**
+  * @brief          返回pitch 6020电机数据指针
+  * @param[in]      none
+  * @retval         电机数据指针
+  */
+const motor_measure_t *get_pitch_gimbal_motor_measure_point(void)
+{
+    return &motor_chassis[5];
+}
+
+/**
+  * @brief          返回拨弹电机 2006电机数据指针
+  * @param[in]      none
+  * @retval         电机数据指针
+  */
+const motor_measure_t *get_trigger_motor_measure_point(void)
+{
+    return &motor_chassis[6];
+}
+
+/**
+  * @brief          返回底盘电机 3508电机数据指针
+  * @param[in]      i: 电机编号,范围[0,3]
+  * @retval         电机数据指针
+  */
+const motor_measure_t *get_chassis_motor_measure_point(uint8_t i)
+{
+    return &motor_chassis[(i & 0x03)];
+}
+
+/**
+  * @brief          返回摩擦轮电机 3508电机数据指针
+  * @param[in]      i: 电机编号,范围[0,1]
+  * @retval         电机数据指针
+  */
+const motor_measure_t *get_shoot_motor_measure_point(uint8_t i)
+{
+    return &motor_shoot[(i & 0x03)];
+}

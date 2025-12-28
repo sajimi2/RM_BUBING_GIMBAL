@@ -1,0 +1,26 @@
+# 忽略Keil编译生成的所有对象文件和输出文件
+*.obj
+*.lst
+*.map
+*.axf
+*.htm
+*.crf
+*.o
+*.d
+*.hex
+*.bin
+*.elf
+
+# 忽略Keil的工程临时文件和目标输出目录
+*.uvguix.*
+*.uvoptx
+*.dep
+JLinkLog.txt
+/Objects/
+/Listings/
+
+# 忽略其他常见临时文件和IDE配置
+.vs/
+.vscode/
+*.suo
+*.user
