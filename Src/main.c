@@ -43,7 +43,7 @@
 #include "gimbal_task.h"
 #include "INS_task.h"
 #include "led_flow_task.h"
-
+#include "NX_communicate.h"
 #include <stdarg.h>
 /* USER CODE END Includes */
 
@@ -139,6 +139,7 @@ int main(void)
   can_filter_init();
   remote_control_init();
   usart1_tx_dma_init();
+  NXrecieve_Init();
   DWT_Init(168);
   while (BMI088_init(&hspi1, 1) != BMI088_NO_ERROR)
   	;

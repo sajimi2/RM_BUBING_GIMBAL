@@ -14,6 +14,7 @@
 
 extern CAN_HandleTypeDef hcan1;
 extern CAN_HandleTypeDef hcan2;
+extern volatile uint8_t  rc_online;     // 遥控器在线状态：0-离线，1-在线
 
 //用于存放所有信息。提供函数接口供外界使用
 static motor_measure_t motor_chassis[7];//四个底盘3508，一个拨弹，一个yaw，一个pitch
@@ -124,51 +125,16 @@ void CAN_cmd_yaw(int16_t yaw)
 static const RC_ctrl_t *rc_chassis;
 
 static CAN_TxHeaderTypeDef  can1_tx_channel_message;
-static CAN_TxHeaderTypeDef  can1_tx_message;//yaw轴的数据也是靠发底盘的can1去底盘c板
-
-static uint8_t can1_send_data[8];		//发送yaw轴电机的编码器完成小陀螺
-//static uint8_t can1_send_data_channel[8];
-//static uint8_t can1_send_data_nuc_yaw[8];
-
-//这个包发yaw控制的相关信息can1，云台的ins读取偏航角
-typedef struct
-{
-	fp32 yaw;
-	fp32 nuc_yaw;
-}can_send_data_s;
-void CAN1_send_yaw()
-{
-	uint32_t send_mail_box;
-	typedef union
-	{
-		can_send_data_s data;
-		uint8_t data_uint8[sizeof(can_send_data_s)];
-	}can_send_data_u;
-	can_send_data_u data_u;
-	
-	data_u.data.yaw=get_INS()->Yaw;
-	
-	for(int i = 0;i < sizeof(can_send_data_s);i++)
-	{
-		can1_send_data[i] = data_u.data_uint8[i];
-	}
-	
-    can1_tx_message.StdId = 0x002;
-    can1_tx_message.IDE = CAN_ID_STD;
-    can1_tx_message.RTR = CAN_RTR_DATA;
-    can1_tx_message.DLC = 0x08;
-
-	HAL_CAN_AddTxMessage(&hcan1, &can1_tx_message, can1_send_data, &send_mail_box);
-}
 
 //这个通道发送底盘控制量
 typedef struct
 {
 	int16_t channel_2;
 	int16_t channel_3;
-	enum RobotState_e mode;
+	uint8_t mode;
+	uint8_t onlineflag;
+	uint16_t key_v;    // 键盘按键值
 }can_send_encode_data_s;
-static const enum RobotState_e *robotMode;
 void CAN1_send_channel()
 {
     uint32_t send_mail_box;
@@ -183,9 +149,12 @@ void CAN1_send_channel()
     
     // 获取遥控数据
     rc_chassis = get_remote_control_point();
-    data_u.data.mode      = *robotMode;
+	
+	data_u.data.onlineflag= rc_online;
+    data_u.data.mode      = (uint8_t)*getRobotPresentMode();
     data_u.data.channel_2 = rc_chassis->rc.ch[2];
     data_u.data.channel_3 = rc_chassis->rc.ch[3];
+	data_u.data.key_v     = rc_chassis->key.v;
     
     can1_tx_channel_message.StdId = 0x003;
     can1_tx_channel_message.IDE = CAN_ID_STD;

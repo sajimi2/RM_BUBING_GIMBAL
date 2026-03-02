@@ -10,11 +10,10 @@
 #include "robot_total_mode.h"
 #include "Robot_Information.h"
 #include "remote_control.h"
-//#include "nucCommu.h"
 #include "bsp_buzzer.h"
 #include "main.h"
 
-#define ROBOT_MODE_TASK_TIME 10	
+#define ROBOT_MODE_TASK_TIME 1	
 #define RC_ROBOT_MODE_CHANNEL 0
 
 static int robotAuto=0;     //自动/手动模式标志，手动0自动1
@@ -63,12 +62,12 @@ void robot_total_mode_task(void const *pvParameters)
             }
             else if(switch_is_up(rc_p->rc.s[RC_ROBOT_MODE_CHANNEL]))
             {
-                //未定义功能
+                robotState=RobotState_e_CommonCar;
             }
         }
 		else//键盘
 		{
-			if(rc_p->key.v & KEY_PRESSED_OFFSET_C)   //c开启云台车模式
+			if(rc_p->key.v & KEY_PRESSED_OFFSET_G)   //c开启云台车模式
 			{
 				robotState=RobotState_e_GimbalCar;
 			}
@@ -77,9 +76,13 @@ void robot_total_mode_task(void const *pvParameters)
 			{
 				robotState=RobotState_e_Spinner;
 			}
+			if(rc_p->key.v & KEY_PRESSED_OFFSET_C)		//车云台朝向为正方向模式
+			{
+				robotState=RobotState_e_CommonCar;
+			}
 		}
 		
-		if(rc_p->rc.s[0]==2)
+		if(rc_p->rc.s[1]==2 || ((rc_p->key.v) & KEY_PRESSED_OFFSET_R))
         {
             robotAuto=1;
         }

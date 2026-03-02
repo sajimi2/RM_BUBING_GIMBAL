@@ -31,6 +31,7 @@
 #include "INS_task.h"
 #include "gimbal_task.h"
 #include "shoot_task.h"
+#include "NX_communicate.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -41,8 +42,8 @@ osThreadId led_RGB_flow_handle;
 osThreadId imuTaskHandle;
 osThreadId gimbalTaskHandle;
 osThreadId shootTaskTask_handle;
-osThreadId shootTaskTrgMntr_handle;
 osThreadId robot_total_mode_task_handle;
+osThreadId NX_handle;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -150,11 +151,11 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(shootTask, shoot_task, osPriorityHigh, 0, 1024);
   shootTaskTask_handle = osThreadCreate(osThread(shootTask), NULL);
   
-  osThreadDef(shootTrgMonitor, shootTaskTrggMonitor, osPriorityRealtime, 0, 128);
-  shootTaskTrgMntr_handle = osThreadCreate(osThread(shootTrgMonitor), NULL);
-  
   osThreadDef(totalmodetask,robot_total_mode_task,osPriorityHigh,0,512);
   robot_total_mode_task_handle = osThreadCreate(osThread(totalmodetask),NULL);
+  
+  osThreadDef(NXsendtask,NX_task,osPriorityNormal,0,512);
+  NX_handle = osThreadCreate(osThread(NXsendtask),NULL);
   /* USER CODE END RTOS_THREADS */
 
 }

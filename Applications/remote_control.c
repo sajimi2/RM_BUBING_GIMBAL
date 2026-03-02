@@ -28,7 +28,7 @@
 
 //遥控器出错数据上限
 #define RC_CHANNAL_ERROR_VALUE 700
-
+#define RC_NO_USART1_OUT
 extern UART_HandleTypeDef huart3;
 extern DMA_HandleTypeDef hdma_usart3_rx;
 extern volatile uint32_t rc_error_count;
@@ -293,16 +293,16 @@ static void sbus_to_rc(volatile const uint8_t *sbus_buf, RC_ctrl_t *rc_ctrl)
   * @param[in]      sbus: sbus数据, 18字节
   * @retval         none
   */
-void sbus_to_usart1(uint8_t *sbus)
-{
-    static uint8_t usart_tx_buf[20];
-    static uint8_t i =0;
-    usart_tx_buf[0] = 0xA6;
-    memcpy(usart_tx_buf + 1, sbus, 18);
-    for(i = 0, usart_tx_buf[19] = 0; i < 19; i++)
-    {
-        usart_tx_buf[19] += usart_tx_buf[i];
-    }
-    usart1_tx_dma_enable(usart_tx_buf, 20);
-}
+//void sbus_to_usart1(uint8_t *sbus)
+//{
+//    static uint8_t usart_tx_buf[20];
+//    static uint8_t i =0;
+//    usart_tx_buf[0] = 0xA6;
+//    memcpy(usart_tx_buf + 1, sbus, 18);
+//    for(i = 0, usart_tx_buf[19] = 0; i < 19; i++)
+//    {
+//        usart_tx_buf[19] += usart_tx_buf[i];
+//    }
+//    usart1_tx_dma_enable(usart_tx_buf, 20);
+//}
 

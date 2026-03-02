@@ -13,7 +13,7 @@
 #include "cmsis_os.h"
 #include "pid.h"
 #include "remote_control.h"
-//#include "nucCommu.h"
+#include "NX_communicate.h"
 #include "Robot_Information.h"
 #include "robot_total_mode.h"
 #include "CAN_recieve_send.h"
@@ -24,9 +24,9 @@
 #define SHOOT_TASK_INIT_TIME 500
 #define SHOOT_CTRL_TIME 5
 
-#define TRIGGER_ROUNDS_FOR_A_BULLET_A 4
-#define TRIGGER_ROUNDS_FOR_A_BULLET_B 5
-#define TRIGGER_ROUNDS_FOR_A_BULLET_C 4
+#define TRIGGER_ROUNDS_FOR_A_BULLET_A 7
+#define TRIGGER_ROUNDS_FOR_A_BULLET_B 8
+#define TRIGGER_ROUNDS_FOR_A_BULLET_C 7
 #define ECD_FULL_ROUND 8192
 #define DEAD_BOND 5
 
@@ -51,7 +51,7 @@
 #define SHOOT_M3508_MOTOR_RPM_TO_VECTOR (0.000415809748903494517209f/5)
 #define SHOOT_M2006_MOTOR_RPM_TO_VECTOR (0.000415809748903494517209f/5)
 
-#define MILESTONE_NEAR_THRESHHOLD 500		//里程碑栈法参数
+#define MILESTONE_NEAR_THRESHHOLD 150		//里程碑栈法参数
 #define MILESTONE_NUMBER 3
 struct milestoneStack_s {
     uint8_t head;
@@ -76,8 +76,8 @@ enum TriggerMode_e{
 	TriggerMode_e_StuckSolve,
 };
 
-//static const toSTM32_t *nuc_p;  //NUC数据位置
-const static RC_ctrl_t *rc_p;
+static const VisionToGimbal_t *nx_p;
+static const RC_ctrl_t *rc_p;
 static int16_t trigger_state=3;//拨杆状态
 static int16_t wheel=0;		   //拨轮值
 
@@ -87,6 +87,7 @@ bool_t fricOn=0;
 uint8_t triggerOn=0;
 
 extern volatile uint8_t  rc_online;
+extern volatile uint8_t data_ready;
 
 static struct TriggerControl_s triggerCtrl;
 static enum TriggerMode_e triggerMode;
@@ -118,8 +119,8 @@ void shoot_task(void const *pvParameters)
     initTriggerECDRoundsMonitor();  //初始化拨弹轮圈数监控
     initShootModes();   //初始化发射状态
 
-    rc_p=get_remote_control_point();    //获取遥控器数据和NUC数据指针
-	//nuc_p = get_nuc_control_point();
+    rc_p = get_remote_control_point();    //获取遥控器数据和NNX数据指针
+	nx_p = get_nx_control_point();
 
     while(1)
     {
@@ -138,16 +139,6 @@ void shoot_task(void const *pvParameters)
         CAN_cmd_shoot(giveShootCurrent[0], giveShootCurrent[1]);
 
 		osDelay(SHOOT_CTRL_TIME);
-    }
-}
-
-void shootTaskTrggMonitor(void const *pvParameters)
-{
-    osDelay(SHOOT_TASK_INIT_TIME);
-    while(1)
-    {
-        //monitorTriggerECDRound();
-        osDelay(1);
     }
 }
 
@@ -185,15 +176,15 @@ static void initTriggerECDRoundsMonitor(void)  //初始化拨弹轮圈数监控
 	triggerCtrl.mstack.stack[0] = 0;
 }
 
-//添加NUC控制发射
+//添加NX控制发射
 static void getInstruction(void)
 {
     if(robotIsAuto())//自动模式
 	{
-		//先打开摩擦轮
-		//nuc输出数据
-		
-		//置信度大于某值，trigger打开
+		if((nx_p->mode == 2) && data_ready)
+		{
+			triggerMode = TriggerMode_e_ShootOne;
+		}
 		return;
 	}
 	else
@@ -327,6 +318,11 @@ void static triggerModeChange(void)
     switch(triggerMode)
     {
         case TriggerMode_e_Stop:
+			// 鼠标控制发射
+			if (rc_p->mouse.press_l == 1)
+			{
+				triggerMode = TriggerMode_e_ShootMulti;
+			}
             // 停止状态下，可以根据摇杆位置进入单发或连发
             if(wheel >= 50 && wheel <= 400)
 			{
@@ -355,7 +351,7 @@ void static triggerModeChange(void)
         case TriggerMode_e_ShootOne:
             // 单发状态下，必须等待单发完成才能切换状态
             // 检查是否达到预定圈数（正转或反转4圈）
-		
+
 			//JYH：没有shootonelatch标志位会反复进入单发状态导致伪连发
             if(triggerCtrl.nowRounds <= (-nowTimeRoundThreshold) || 
                triggerCtrl.nowRounds >= nowTimeRoundThreshold)
@@ -403,7 +399,8 @@ void static triggerModeChange(void)
 //摩擦轮状态机
 static void fricModeChange(void)
 {
-	if(trigger_state==1)//开
+	fricOn=0;
+	if(trigger_state==1 || rc_p->mouse.press_r==1)//开
 	{
 		fricOn=1;
 	}
@@ -411,9 +408,9 @@ static void fricModeChange(void)
 	{
 		fricOn=0;
 	}
-	else if(trigger_state==2)//自动
+	else if(trigger_state==2 || robotIsAuto())//自动
 	{
-		//根据confidence设置fircon
+		fricOn=1;//进自动模式全程开摩擦轮
 	}
 }
 

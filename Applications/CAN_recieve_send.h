@@ -89,7 +89,6 @@ extern const motor_measure_t *get_chassis_motor_measure_point(uint8_t i);
   * @retval         电机数据指针
   */
 extern const motor_measure_t *get_shoot_motor_measure_point(uint8_t i);
-extern void CAN1_send_yaw(void);
 extern void CAN1_send_channel(void);
 //extern void CAN1_send_nuc_yaw(void);
 //extern const can_send_referee_s* get_refree_point(void);
