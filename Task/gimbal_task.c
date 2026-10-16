@@ -458,8 +458,12 @@ void getControlAngles(void)
 	
     // 自动控制模式
 
-	delta_pitch = -(float)(nx_p->pitch)*3.1415926f/32767-PitchCtrl.nowAbsoluteAngle;
-    delta_yaw = (float)(nx_p->yaw)*3.1415926f/32767-YawCtrl.nowAbsoluteAngle;
+    // 绝对角复现：沿用 CAN 的角度缩放和 Pitch 取反约定，目标须与 INS 反馈同参考系。
+    const fp32 vision_pitch_target = -(fp32)(nx_p->pitch) * 3.1415926f / 32767;
+    const fp32 vision_yaw_target = (fp32)(nx_p->yaw) * 3.1415926f / 32767;
+    // 保留误差变量供观测；新视觉帧直接覆盖目标，不再累加误差。
+    delta_pitch = vision_pitch_target - PitchCtrl.nowAbsoluteAngle;
+    delta_yaw = vision_yaw_target - YawCtrl.nowAbsoluteAngle;
 //	if(delta_pitch <= target && delta_pitch >= target)
 //	{
 //		delta_pitch = 0;
@@ -477,10 +481,10 @@ void getControlAngles(void)
         {
             
             // Pitch轴自动控制
-            PitchCtrl.want_AbsoluteAngleCtrl += delta_pitch; // 视觉直接给定目标角度
+            PitchCtrl.want_AbsoluteAngleCtrl = vision_pitch_target; // 每个新帧给定绝对目标，零角度也有效
 
             // Yaw轴自动控制
-            YawCtrl.want_AbsoluteAngleCtrl += delta_yaw; // 视觉直接给定目标角度
+            YawCtrl.want_AbsoluteAngleCtrl = vision_yaw_target; // 重复同一目标不产生额外累加
 				
             data_ready = 0;
         }
