@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-17",
+  "timezone": "Asia/Shanghai",
+  "tested_git_tree": "55ac8463a0d448078026339f257f3f5d8dbe53b2",
+  "source_tag": "archive/2026-10-17-can-absolute-cmake",
+  "method": "从候选 Git tree 导出无构建缓存的独立目录，完整编译链接；最终提交只允许补充归档文档和验证记录",
+  "flashed": false,
+  "hardware_tested": false,
+  "builds": {
+    "Debug": {
+      "result": "passed",
+      "compiler": "GNU Tools for STM32 14.3.1+st.2",
+      "artifacts": {
+        "standard_robot.bin": {
+          "bytes": 80372,
+          "sha256": "54ea68d592d0c831e7ad73b7a04f3e988b28519394af43fe9f86deac3c717cd1"
+        },
+        "standard_robot.elf": {
+          "bytes": 2506556,
+          "sha256": "480192c628e4e42ed2c56bf71685292fb402a961492ab41b53ddd4f1e99660d6"
+        },
+        "standard_robot.hex": {
+          "bytes": 226126,
+          "sha256": "dc283ef6a93ed44ff58310788696bba67c7b83d474c8590e9ce94cae5d6b6eae"
+        }
+      }
+    },
+    "Release": {
+      "result": "passed",
+      "compiler": "GNU Tools for STM32 14.3.1+st.2",
+      "artifacts": {
+        "standard_robot.bin": {
+          "bytes": 77076,
+          "sha256": "8d4bacf560e6c0522443033d33f69d037fda0b42c0bde5df76f7f16609999302"
+        },
+        "standard_robot.elf": {
+          "bytes": 645040,
+          "sha256": "b1840d26fba99b44ba0ee20bd8c9b7daf5cba46ee45bb3b3a85d2ab58fbf650f"
+        },
+        "standard_robot.hex": {
+          "bytes": 216856,
+          "sha256": "61c00ac4e70f47f140d142308b5a97311d1fce8794e196950dde0d2c6329dd70"
+        }
+      }
+    },
+    "Keil": {
+      "result": "passed",
+      "compiler": "ARMCC 5.06 update 7 build 960",
+      "operation": "Rebuild",
+      "errors": 0,
+      "warnings": 1,
+      "artifacts": {
+        "standard_robot.axf": {
+          "bytes": 1716576,
+          "sha256": "b5ac4449fd717d3338baefe6cc774da69dcd3e251cfa8fd80e1f1eb303b90813"
+        },
+        "standard_robot.hex": {
+          "bytes": 165193,
+          "sha256": "88c1ab108b5096ee8f93cc839b60552666447cf00e7174fc9ebaf4d7dbf91901"
+        }
+      }
+    }
+  },
+  "known_gcc_warnings": [
+    "missing-braces",
+    "address-of-packed-member",
+    "unused-function",
+    "maybe-uninitialized: bsp_i2c.c",
+    "NDEBUG redefined: Release"
+  ],
+  "generated_metadata_note": "Keil 重建仅将 RTE_Components.h 注释中的 uVision 版本从 5.43.1.0 更新为本机 5.42.0.0；已核对其余内容完全一致，当前工作区保留原文件。"
+}

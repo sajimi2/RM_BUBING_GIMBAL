@@ -1,0 +1,22 @@
+{
+  "archive_created": "2026-10-17",
+  "timezone": "Asia/Shanghai",
+  "source": "修改绝对角处理之前备份的本地 Keil 编译产物；原文件修改时间 2026-10-15",
+  "compiler_from_original_build_log": "ARMCC 5.06 update 7 build 960",
+  "control_path_evidence": "此前反汇编核对到 received_angle - INS_angle，再累加到旧目标",
+  "source_reference_tag": "archive/2026-10-16-can-error-accumulation",
+  "source_to_binary_exact_match_verified": false,
+  "matches_firmware_on_board": null,
+  "rebuilt_during_archive": false,
+  "flashed_during_archive": false,
+  "files": {
+    "standard_robot.axf": {
+      "bytes": 2871660,
+      "sha256": "b5dd547c713cb606160ce686f4bf994503475b501a61cc35c70688574df7c1a2"
+    },
+    "standard_robot.hex": {
+      "bytes": 165238,
+      "sha256": "9216f38e535bf472df7ba19fed2890c1c7d3a02406e3fa0a4896cef9b7ef3192"
+    }
+  }
+}

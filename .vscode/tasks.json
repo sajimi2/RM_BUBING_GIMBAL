@@ -2,33 +2,205 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "STM32Cube: 构建 Debug",
+            "type": "process",
+            "command": "rtk",
+            "args": [
+                "proxy",
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/tools/stm32cube.ps1",
+                "-Action",
+                "Build",
+                "-Configuration",
+                "Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "STM32Cube: 全部重建 Debug",
+            "type": "process",
+            "command": "rtk",
+            "args": [
+                "proxy",
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/tools/stm32cube.ps1",
+                "-Action",
+                "Rebuild",
+                "-Configuration",
+                "Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        },
+        {
+            "label": "STM32Cube: 构建 Release",
+            "type": "process",
+            "command": "rtk",
+            "args": [
+                "proxy",
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/tools/stm32cube.ps1",
+                "-Action",
+                "Build",
+                "-Configuration",
+                "Release"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        },
+        {
+            "label": "STM32Cube: 构建并烧录 Debug",
+            "type": "process",
+            "command": "rtk",
+            "args": [
+                "proxy",
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/tools/stm32cube.ps1",
+                "-Action",
+                "Flash",
+                "-Configuration",
+                "Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
             "label": "Keil: 构建",
             "type": "process",
             "command": "rtk",
-            "args": ["proxy", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/tools/keil.ps1", "-Action", "Build"],
-            "options": { "cwd": "${workspaceFolder}" },
-            "group": { "kind": "build", "isDefault": true },
+            "args": [
+                "proxy",
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/tools/keil.ps1",
+                "-Action",
+                "Build"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
             "problemMatcher": [],
-            "presentation": { "reveal": "always", "panel": "shared" }
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
         },
         {
             "label": "Keil: 全部重建",
             "type": "process",
             "command": "rtk",
-            "args": ["proxy", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/tools/keil.ps1", "-Action", "Rebuild"],
-            "options": { "cwd": "${workspaceFolder}" },
+            "args": [
+                "proxy",
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/tools/keil.ps1",
+                "-Action",
+                "Rebuild"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
             "group": "build",
             "problemMatcher": [],
-            "presentation": { "reveal": "always", "panel": "shared" }
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
         },
         {
             "label": "Keil: 构建并烧录",
             "type": "process",
             "command": "rtk",
-            "args": ["proxy", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/tools/keil.ps1", "-Action", "Flash"],
-            "options": { "cwd": "${workspaceFolder}" },
+            "args": [
+                "proxy",
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/tools/keil.ps1",
+                "-Action",
+                "Flash"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
             "problemMatcher": [],
-            "presentation": { "reveal": "always", "panel": "shared" }
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
         }
     ]
 }

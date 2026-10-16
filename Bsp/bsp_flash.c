@@ -12,7 +12,6 @@
   * @param[in]      address: flash 地址
   * @retval         sector号
   */
-static uint32_t ger_sector(uint32_t address);
 
 /**
   * @brief          erase flash

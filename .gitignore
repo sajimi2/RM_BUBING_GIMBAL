@@ -21,6 +21,24 @@ JLinkLog.txt
 
 # 忽略其他常见临时文件和IDE配置
 .vs/
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/c_cpp_properties.json
 *.suo
 *.user
+
+# CMake 构建产物和个人预设
+/build/
+/CMakeUserPresets.json
+
+# Keil 自动生成目录和本机下载器配置；源码及工具脚本单独纳入版本管理
+/MDK-ARM/standard_robot/
+/MDK-ARM/DebugConfig/
+/MDK-ARM/RTE/Device/
+/MDK-ARM/Nu_Link_Driver.ini
+
+# 经人工确认的历史固件存档；日常编译产物仍然忽略
+!/archives/firmware/**/*.axf
+!/archives/firmware/**/*.hex

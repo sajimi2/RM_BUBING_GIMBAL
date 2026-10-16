@@ -97,14 +97,14 @@ typedef struct
     fp32 frame_period; //时间间隔
 } ramp_function_source_t;
 
-typedef __packed struct
+typedef __PACKED_STRUCT
 {
     fp32 input;        //输入数据
     fp32 out;          //滤波输出的数据
     fp32 num[1];       //滤波参数
     fp32 frame_period; //滤波的时间间隔 单位 s
 } first_order_filter_type_t;
-typedef __packed struct
+typedef __PACKED_STRUCT
 {
     uint16_t Order;
     uint32_t Count;

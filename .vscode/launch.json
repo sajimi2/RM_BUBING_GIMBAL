@@ -1,0 +1,24 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STM32Cube: 烧录并调试云台 (Debug)",
+            "type": "stlinkgdbtarget",
+            "request": "launch",
+            "origin": "snippet",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "STM32Cube: 构建 Debug",
+            "preBuild": "",
+            "deviceName": "STM32F407IGH6",
+            "deviceCore": "Cortex-M4",
+            "runEntry": "main",
+            "serverInterface": "SWD",
+            "serverVerify": true,
+            "serverSemihosting": { "enabled": false },
+            "serverRtos": { "enabled": true, "driver": "freertos", "driverPort": "ARM_CM4F" },
+            "imagesAndSymbols": [
+                { "imageFileName": "${workspaceFolder}/build/Debug/standard_robot.elf" }
+            ]
+        }
+    ]
+}

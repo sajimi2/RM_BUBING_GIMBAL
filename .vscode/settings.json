@@ -3,7 +3,13 @@
     "files.autoGuessEncoding": false,
     "C_Cpp.intelliSenseEngine": "default",
     "stm32cube-ide-clangd.enable": false,
-    "cmake.configureOnOpen": false,
-    "cmake.automaticReconfigure": false,
-    "cmake.ignoreCMakeListsMissing": true
+    "cmake.configureOnOpen": true,
+    "cmake.automaticReconfigure": true,
+    "cmake.ignoreCMakeListsMissing": false,
+    "cmake.cmakePath": "cube-cmake",
+    "cmake.configureArgs": [
+        "-DCMAKE_COMMAND=cube-cmake"
+    ],
+    "cmake.useCMakePresets": "always",
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
 }
