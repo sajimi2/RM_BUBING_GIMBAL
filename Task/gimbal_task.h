@@ -11,4 +11,7 @@ fp32 get_yaw_current_angle(void);
 fp32 get_yaw_current_speed(void);
 fp32 get_pitch_current_angle(void);
 fp32 get_pitch_current_speed(void);
+/* 只读调试接口：返回实际交给位置环的目标角度，单位 rad。 */
+fp32 get_yaw_target_angle(void);
+fp32 get_pitch_target_angle(void);
 #endif

@@ -21,6 +21,12 @@ extern uint8_t fire_t;
 //用于存放所有信息。提供函数接口供外界使用
 static motor_measure_t motor_chassis[7];//四个底盘3508，一个拨弹，一个yaw，一个pitch
 static motor_measure_t motor_shoot[2];
+static volatile gimbal_rx_observation_t gimbal_rx_observation;
+
+const volatile gimbal_rx_observation_t *get_gimbal_rx_observation(void)
+{
+    return &gimbal_rx_observation;
+}
 
 static CAN_TxHeaderTypeDef  gimbal_tx_message;
 static uint8_t              gimbal_can_send_data[8];
@@ -60,6 +66,18 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//收取回调，
 				break;
 			}		
 			get_motor_measure(&motor_chassis[i], rx_data);//一个拨弹，一个yaw，一个pitch
+
+            /* 仅记录收包时间；掉线时 VOFA 显示数据年龄，避免把旧角度当新反馈。 */
+            if (i == 4)
+            {
+                gimbal_rx_observation.yaw_last_ms = HAL_GetTick();
+                gimbal_rx_observation.yaw_seen = 1;
+            }
+            else if (i == 5)
+            {
+                gimbal_rx_observation.pitch_last_ms = HAL_GetTick();
+                gimbal_rx_observation.pitch_seen = 1;
+            }
 			break;
 		}
 		case 0x004://裁判系统发的东西，先不管
@@ -108,6 +126,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//收取回调，
     data_u.data[7] = rx_data[7];
 
     NX_data = data_u.NX_data;
+    gimbal_rx_observation.vision_last_ms = HAL_GetTick();
+    gimbal_rx_observation.vision_seen = 1;
     data_ready = 1;
 	
 	fire_t = NX_data.fire;

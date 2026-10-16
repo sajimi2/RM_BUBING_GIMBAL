@@ -8,6 +8,7 @@
 "standard_robot\robot_total_mode.o"
 "standard_robot\nx_communicate.o"
 "standard_robot\reset_task.o"
+"standard_robot\vofa_debug.o"
 "standard_robot\usart6_debug.o"
 "standard_robot\pid.o"
 "standard_robot\controller.o"

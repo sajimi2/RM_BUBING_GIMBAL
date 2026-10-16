@@ -3,6 +3,14 @@
 #include "struct_typedef.h"
 #include "Robot_Information.h"
 
+/* 只用于观测反馈新鲜度，不参与电机控制或视觉 data_ready 消费。 */
+typedef struct
+{
+    uint32_t vision_last_ms, yaw_last_ms, pitch_last_ms;
+    uint8_t vision_seen, yaw_seen, pitch_seen;
+} gimbal_rx_observation_t;
+const volatile gimbal_rx_observation_t *get_gimbal_rx_observation(void);
+
 //定义电机信息读取。实际是宏
 #define get_motor_measure(ptr, data)                                    \
     {                                                                   \
