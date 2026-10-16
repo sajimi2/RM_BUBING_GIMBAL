@@ -1,6 +1,6 @@
 /**
  * @file Robot_Information.h
- * @brief Í¨ÓÃµÄÊı¾İ½á¹¹
+ * @brief é€šç”¨çš„æ•°æ®ç»“æ„
  * @Auther Jing Yuhang  jyh16213839418@163.com
  * @version 0.3
  * @date 2025-12-21
@@ -32,10 +32,10 @@ typedef enum
     CAN_SHOOT_ALL_ID=0X200,
     CAN_SHOOT_3508_ID_1=0X201,
     CAN_SHOOT_3508_ID_2=0X202,
-    // Á½¸öÄ¦²ÁÂÖ3508¹ÒÔØÔÚÔÆÌ¨can2ÉÏ
+    // ä¸¤ä¸ªæ‘©æ“¦è½®3508æŒ‚è½½åœ¨äº‘å°can2ä¸Š
 } can_msg_id_e;
 
-typedef struct							//ËùÓĞµç»úÊı¾İ½á¹¹
+typedef struct							//æ‰€æœ‰ç”µæœºæ•°æ®ç»“æ„
 {
     uint16_t ecd;
     int16_t speed_rpm;
@@ -44,13 +44,13 @@ typedef struct							//ËùÓĞµç»úÊı¾İ½á¹¹
     int16_t last_ecd;
 } motor_measure_t;
 
-enum RobotState_e{						//Õû³µÄ£Ê½Ã¶¾Ù£¬½«totalmodeÕûºÏ½øinformation
-    RobotState_e_Powerless=0,     		//ÎŞÁ¦Ä£Ê½
+enum RobotState_e{						//æ•´è½¦æ¨¡å¼æšä¸¾ï¼Œå°†totalmodeæ•´åˆè¿›information
+    RobotState_e_Powerless=0,     		//æ— åŠ›æ¨¡å¼
 
-    RobotState_e_CommonCar=3,     		//ÆÕÍ¨³µÄ£Ê½
+    RobotState_e_CommonCar=3,     		//æ™®é€šè½¦æ¨¡å¼
 
-    RobotState_e_GimbalCar=1,        	//µ×ÅÌ¸úËæÔÆÌ¨
+    RobotState_e_GimbalCar=1,        	//åº•ç›˜è·Ÿéšäº‘å°
                                 
-    RobotState_e_Spinner=2,     		//Ğ¡ÍÓÂİ
+    RobotState_e_Spinner=2,     		//å°é™€èº
 };
 #endif

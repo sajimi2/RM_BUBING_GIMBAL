@@ -1,0 +1,9 @@
+{
+    "files.encoding": "utf8",
+    "files.autoGuessEncoding": false,
+    "C_Cpp.intelliSenseEngine": "default",
+    "stm32cube-ide-clangd.enable": false,
+    "cmake.configureOnOpen": false,
+    "cmake.automaticReconfigure": false,
+    "cmake.ignoreCMakeListsMissing": true
+}

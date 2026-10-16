@@ -32,6 +32,7 @@
 #include "gimbal_task.h"
 #include "shoot_task.h"
 #include "NX_communicate.h"
+#include "Reset_task.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,6 +45,7 @@ osThreadId gimbalTaskHandle;
 osThreadId shootTaskTask_handle;
 osThreadId robot_total_mode_task_handle;
 osThreadId NX_handle;
+osThreadId resetTaskHandle;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -154,8 +156,8 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(totalmodetask,robot_total_mode_task,osPriorityHigh,0,512);
   robot_total_mode_task_handle = osThreadCreate(osThread(totalmodetask),NULL);
   
-  osThreadDef(NXsendtask,NX_task,osPriorityNormal,0,512);
-  NX_handle = osThreadCreate(osThread(NXsendtask),NULL);
+  osThreadDef(reset, reset_task, osPriorityNormal, 0, 128);
+  resetTaskHandle = osThreadCreate(osThread(reset), NULL);
   /* USER CODE END RTOS_THREADS */
 
 }

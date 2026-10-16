@@ -7,14 +7,14 @@
  * @brief
  ******************************************************************************
  * @attention
- *  ÓÃÀ´Í¬ÉÏÎ»»úºÍµ×ÅÌc°æÍ¨ĞÅ
+ *  ç”¨æ¥åŒä¸Šä½æœºå’Œåº•ç›˜cç‰ˆé€šä¿¡
  ******************************************************************************
  */
  
 #include "communication_task.h"
 #include "main.h"
 #include "CAN_recieve_send.h"
-//#include "nucCommu.h"
+#include "NX_communicate.h"
 #include "INS_task.h"
 #include "usart.h"
 #include "bsp_usart.h"
@@ -22,7 +22,7 @@
 #include "robot_total_mode.h"
 
 
-//******************È«¾Ö±äÁ¿*******************
+//******************å…¨å±€å˜é‡*******************
 //static uint8_t GimbalAngleMsg[40];
 
 
@@ -30,13 +30,11 @@ void communication_task(void const *pvParameters){
 		int count = 0;
     while (1)
     {
-				//ÒÔ200Ö¡µÄËÙÂÊ¸ønuc·¢ËÍÔÆÌ¨ĞÅÏ¢
-//				if(count % 5  ==  0)
-//				{
-//					Encode1(GimbalAngleMsg,get_INS()->Yaw,-get_INS()->Pitch,get_INS()->Roll);
-//					HAL_UART_Transmit(&huart1, GimbalAngleMsg, 17, 100);
-//					usart1_tx_dma_enable(GimbalAngleMsg, 17);
-//				}
+				//ä»¥200å¸§çš„é€Ÿç‡ç»™nxå‘é€äº‘å°ä¿¡æ¯
+				if(count % 5  ==  0)
+				{
+					Send_Gimbal_Information();
+				}
 //				if(count % 100 == 0)
 //				{
 //					//usart_printf("%d", get_refree_point()->robot_id);
@@ -44,7 +42,7 @@ void communication_task(void const *pvParameters){
 //					HAL_UART_Transmit(&huart1, GimbalAngleMsg, 9, 100);
 //					usart1_tx_dma_enable(GimbalAngleMsg, 9);
 //				}
-				if(count % 1 ==0)  CAN1_send_channel();//¸øµ×ÅÌ·¢ËÍÒ£¿ØĞÅÏ¢
+				if(count % 1 ==0)  CAN1_send_channel();//ç»™åº•ç›˜å‘é€é¥æ§ä¿¡æ¯
 				
 				count++;
 				

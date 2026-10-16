@@ -17,18 +17,18 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-/* ÈÎÎñÊ±³¤³£Á¿ ------------------------------------------------------------*/
+/* ä»»åŠ¡æ—¶é•¿å¸¸é‡ ------------------------------------------------------------*/
 #define SHOOT_TASK_INIT_TIME 500
 #define SHOOT_CTRL_TIME 5
 
-/* ²¦µ¯²ÎÊı ----------------------------------------------------------------*/
+/* æ‹¨å¼¹å‚æ•° ----------------------------------------------------------------*/
 #define TRIGGER_ROUNDS_FOR_A_BULLET_A 4
 #define TRIGGER_ROUNDS_FOR_A_BULLET_B 4
 #define TRIGGER_ROUNDS_FOR_A_BULLET_C 4
 #define ECD_FULL_ROUND 8192
 #define DEAD_BOND 5
 
-/* µç»úËÙ¶È»·PID²ÎÊı ------------------------------------------------------*/
+/* ç”µæœºé€Ÿåº¦ç¯PIDå‚æ•° ------------------------------------------------------*/
 #define M3508_MOTOR_SPEED_PID_KP 60000.0f
 #define M3508_MOTOR_SPEED_PID_KI 0.0f
 #define M3508_MOTOR_SPEED_PID_KD 0.0f
@@ -37,7 +37,7 @@ extern "C" {
 #define M2006_MOTOR_SPEED_PID_KI 0.0f
 #define M2006_MOTOR_SPEED_PID_KD 1000.0f
 
-/* µç»úµçÁ÷ÏŞÖÆ ------------------------------------------------------------*/
+/* ç”µæœºç”µæµé™åˆ¶ ------------------------------------------------------------*/
 #define MAX_MOTOR_3508_CURRENT 30000.0f
 #define MAX_MOTOR_2006_CURRENT 30000.0f
 
@@ -47,75 +47,75 @@ extern "C" {
 #define M2006_MOTOR_SPEED_PID_MAX_OUT          MAX_MOTOR_2006_CURRENT
 #define M2006_MOTOR_SPEED_PID_MAX_IOUT         2000.0f
 
-/* RPM×ªËÙ¶ÈÏòÁ¿ÏµÊı ------------------------------------------------------*/
+/* RPMè½¬é€Ÿåº¦å‘é‡ç³»æ•° ------------------------------------------------------*/
 #define SHOOT_M3508_MOTOR_RPM_TO_VECTOR (0.000415809748903494517209f/5)
 #define SHOOT_M2006_MOTOR_RPM_TO_VECTOR (0.000415809748903494517209f/5)
 
-/* Àï³Ì±®Õ»·¨²ÎÊı ----------------------------------------------------------*/
+/* é‡Œç¨‹ç¢‘æ ˆæ³•å‚æ•° ----------------------------------------------------------*/
 #define MILESTONE_NEAR_THRESHHOLD 500
 #define MILESTONE_NUMBER 3
 
 
-extern bool_t fricOn;        // Ä¦²ÁÂÖ¿ªÆô±êÖ¾
-extern uint8_t triggerOn;    // ²¦µ¯ÂÖ¿ªÆô±êÖ¾
-extern int16_t giveShootCurrent[2];  // Ä¦²ÁÂÖÊä³öµçÁ÷
-extern int16_t giveTriggerCurrent;   // ²¦µ¯ÂÖÊä³öµçÁ÷
+extern bool_t fricOn;        // æ‘©æ“¦è½®å¼€å¯æ ‡å¿—
+extern uint8_t triggerOn;    // æ‹¨å¼¹è½®å¼€å¯æ ‡å¿—
+extern int16_t giveShootCurrent[2];  // æ‘©æ“¦è½®è¾“å‡ºç”µæµ
+extern int16_t giveTriggerCurrent;   // æ‹¨å¼¹è½®è¾“å‡ºç”µæµ
 
 /**
- * @brief ·¢ÉäÈÎÎñÖ÷º¯Êı
- * @param pvParameters ÈÎÎñ²ÎÊı
+ * @brief å‘å°„ä»»åŠ¡ä¸»å‡½æ•°
+ * @param pvParameters ä»»åŠ¡å‚æ•°
  */
 void shoot_task(void const *pvParameters);
 
 /**
- * @brief ·¢ÉäÈÎÎñ´¥·¢Æ÷¼à¿Øº¯Êı
- * @param argument ÈÎÎñ²ÎÊı
+ * @brief å‘å°„ä»»åŠ¡è§¦å‘å™¨ç›‘æ§å‡½æ•°
+ * @param argument ä»»åŠ¡å‚æ•°
  */
 void shootTaskTrggMonitor(void const *argument);
 
 /**
- * @brief »ñÈ¡²¦µ¯ÂÖµçÁ÷Ö¸Õë
- * @return Ö¸Ïò²¦µ¯ÂÖµçÁ÷µÄÖ¸Õë
+ * @brief è·å–æ‹¨å¼¹è½®ç”µæµæŒ‡é’ˆ
+ * @return æŒ‡å‘æ‹¨å¼¹è½®ç”µæµçš„æŒ‡é’ˆ
  */
 int16_t * getTriggerCurrentP(void);
 
 /**
- * @brief »ñÈ¡Ä¦²ÁÂÖ×´Ì¬
- * @return Ä¦²ÁÂÖ¿ªÆô×´Ì¬
+ * @brief è·å–æ‘©æ“¦è½®çŠ¶æ€
+ * @return æ‘©æ“¦è½®å¼€å¯çŠ¶æ€
  */
 bool_t get_fric(void);
 
-/* ÄÚ²¿º¯ÊıÉùÃ÷£¨¹©ÆäËûÄ£¿éÊ¹ÓÃ£©------------------------------------------*/
+/* å†…éƒ¨å‡½æ•°å£°æ˜ï¼ˆä¾›å…¶ä»–æ¨¡å—ä½¿ç”¨ï¼‰------------------------------------------*/
 
 /**
- * @brief »ñÈ¡Ä¦²ÁÂÖµç»ú²âÁ¿µã
- * @param motor_id µç»úID (0»ò1)
- * @return µç»ú²âÁ¿Êı¾İ½á¹¹Ö¸Õë
+ * @brief è·å–æ‘©æ“¦è½®ç”µæœºæµ‹é‡ç‚¹
+ * @param motor_id ç”µæœºID (0æˆ–1)
+ * @return ç”µæœºæµ‹é‡æ•°æ®ç»“æ„æŒ‡é’ˆ
  */
 const motor_measure_t *get_shoot_motor_measure_point(uint8_t motor_id);
 
 /**
- * @brief »ñÈ¡²¦µ¯ÂÖµç»ú²âÁ¿µã
- * @return µç»ú²âÁ¿Êı¾İ½á¹¹Ö¸Õë
+ * @brief è·å–æ‹¨å¼¹è½®ç”µæœºæµ‹é‡ç‚¹
+ * @return ç”µæœºæµ‹é‡æ•°æ®ç»“æ„æŒ‡é’ˆ
  */
 const motor_measure_t *get_trigger_motor_measure_point(void);
 
 /**
- * @brief ·¢ËÍÉä»÷¿ØÖÆCANÃüÁî
- * @param current1 µç»ú1µçÁ÷
- * @param current2 µç»ú2µçÁ÷
+ * @brief å‘é€å°„å‡»æ§åˆ¶CANå‘½ä»¤
+ * @param current1 ç”µæœº1ç”µæµ
+ * @param current2 ç”µæœº2ç”µæµ
  */
 void CAN_cmd_shoot(int16_t current1, int16_t current2);
 
 /**
- * @brief »ñÈ¡Ò£¿ØÆ÷Êı¾İÖ¸Õë
- * @return Ò£¿ØÆ÷Êı¾İ½á¹¹Ö¸Õë
+ * @brief è·å–é¥æ§å™¨æ•°æ®æŒ‡é’ˆ
+ * @return é¥æ§å™¨æ•°æ®ç»“æ„æŒ‡é’ˆ
  */
 const RC_ctrl_t *get_remote_control_point(void);
 
 /**
- * @brief »ñÈ¡»úÆ÷ÈËÊÇ·ñ´¦ÓÚ×Ô¶¯Ä£Ê½
- * @return ×Ô¶¯Ä£Ê½×´Ì¬
+ * @brief è·å–æœºå™¨äººæ˜¯å¦å¤„äºè‡ªåŠ¨æ¨¡å¼
+ * @return è‡ªåŠ¨æ¨¡å¼çŠ¶æ€
  */
 int robotIsAuto(void);
 

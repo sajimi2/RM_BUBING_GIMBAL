@@ -2,8 +2,8 @@
 #define ROBOT_TOTAL_MODE_H
 #include "struct_typedef.h"
 
-extern int robotIsAuto(void);  // ¶ÔÍâÌá¹©µÄ½Ó¿Ú£¬·µ»ØÄ¿Ç°»úÆ÷ÈËÊÇ·ñ×Ô¶¯
-const enum RobotState_e * getRobotPresentMode(void);  //·µ»Ø»úÆ÷ÈËµ±Ç°×´Ì¬Ö¸Õë
+extern int robotIsAuto(void);  // å¯¹å¤–æä¾›çš„æ¥å£ï¼Œè¿”å›ç›®å‰æœºå™¨äººæ˜¯å¦è‡ªåŠ¨
+const enum RobotState_e * getRobotPresentMode(void);  //è¿”å›æœºå™¨äººå½“å‰çŠ¶æ€æŒ‡é’ˆ
 void robot_total_mode_task(void const *pvParameters);
 void CtrlModeDetect(void);
 

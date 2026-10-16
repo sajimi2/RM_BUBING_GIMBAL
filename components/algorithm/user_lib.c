@@ -24,7 +24,7 @@
 
 uint8_t GlobalDebugMode = 7;
 
-//¿ìËÙ¿ª·½
+//å¿«é€Ÿå¼€æ–¹
 float Sqrt(float x)
 {
     float y;
@@ -51,7 +51,7 @@ float Sqrt(float x)
     return y;
 }
 
-//¿ìËÙÇóÆ½·½¸ùµ¹Êı
+//å¿«é€Ÿæ±‚å¹³æ–¹æ ¹å€’æ•°
 /*
 float invSqrt(float num)
 {
@@ -65,13 +65,13 @@ return y;
 }*/
 
 /**
-  * @brief          Ğ±²¨º¯Êı³õÊ¼»¯
+  * @brief          æ–œæ³¢å‡½æ•°åˆå§‹åŒ–
   * @author         RM
-  * @param[in]      Ğ±²¨º¯Êı½á¹¹Ìå
-  * @param[in]      ¼ä¸ôµÄÊ±¼ä£¬µ¥Î» s
-  * @param[in]      ×î´óÖµ
-  * @param[in]      ×îĞ¡Öµ
-  * @retval         ·µ»Ø¿Õ
+  * @param[in]      æ–œæ³¢å‡½æ•°ç»“æ„ä½“
+  * @param[in]      é—´éš”çš„æ—¶é—´ï¼Œå•ä½ s
+  * @param[in]      æœ€å¤§å€¼
+  * @param[in]      æœ€å°å€¼
+  * @retval         è¿”å›ç©º
   */
 void ramp_init(ramp_function_source_t *ramp_source_type, float frame_period, float max, float min)
 {
@@ -83,12 +83,12 @@ void ramp_init(ramp_function_source_t *ramp_source_type, float frame_period, flo
 }
 
 /**
-  * @brief          Ğ±²¨º¯Êı¼ÆËã£¬¸ù¾İÊäÈëµÄÖµ½øĞĞµş¼Ó£¬ ÊäÈëµ¥Î»Îª /s ¼´Ò»ÃëºóÔö¼ÓÊäÈëµÄÖµ
+  * @brief          æ–œæ³¢å‡½æ•°è®¡ç®—ï¼Œæ ¹æ®è¾“å…¥çš„å€¼è¿›è¡Œå åŠ ï¼Œ è¾“å…¥å•ä½ä¸º /s å³ä¸€ç§’åå¢åŠ è¾“å…¥çš„å€¼
   * @author         RM
-  * @param[in]      Ğ±²¨º¯Êı½á¹¹Ìå
-  * @param[in]      ÊäÈëÖµ
-  * @param[in]      ÂË²¨²ÎÊı
-  * @retval         ·µ»Ø¿Õ
+  * @param[in]      æ–œæ³¢å‡½æ•°ç»“æ„ä½“
+  * @param[in]      è¾“å…¥å€¼
+  * @param[in]      æ»¤æ³¢å‚æ•°
+  * @retval         è¿”å›ç©º
   */
 float ramp_calc(ramp_function_source_t *ramp_source_type, float input)
 {
@@ -105,12 +105,12 @@ float ramp_calc(ramp_function_source_t *ramp_source_type, float input)
 return ramp_source_type->out;
 }
 /**
-  * @brief          ?????????
+  * @brief          ä¸€é˜¶ä½é€šæ»¤æ³¢å™¨åˆå§‹åŒ–
   * @author         RM
-  * @param[in]      ?????????
-  * @param[in]      ?????,?? s
-  * @param[in]      ????
-  * @retval         ???
+  * @param[in]      first_order_filter_type: ä¸€é˜¶ä½é€šæ»¤æ³¢å™¨ç»“æ„ä½“æŒ‡é’ˆ
+  * @param[in]      frame_period: é‡‡æ ·å‘¨æœŸï¼Œå•ä½ s
+  * @param[in]      num: æ»¤æ³¢å‚æ•°æ•°ç»„ï¼Œnum[0] ä¸ºæ—¶é—´å¸¸æ•°ï¼Œå•ä½ s
+  * @retval         æ— è¿”å›å€¼
   */
 void first_order_filter_init(first_order_filter_type_t *first_order_filter_type, fp32 frame_period, const fp32 num[1])
 {
@@ -120,11 +120,11 @@ void first_order_filter_init(first_order_filter_type_t *first_order_filter_type,
     first_order_filter_type->out = 0.0f;
 }
 /**
-  * @brief          Ò»½×µÍÍ¨ÂË²¨¼ÆËã
+  * @brief          ä¸€é˜¶ä½é€šæ»¤æ³¢è®¡ç®—
   * @author         RM
-  * @param[in]      Ò»½×µÍÍ¨ÂË²¨½á¹¹Ìå
-  * @param[in]      ¼ä¸ôµÄÊ±¼ä£¬µ¥Î» s
-  * @retval         ·µ»Ø¿Õ
+  * @param[in]      ä¸€é˜¶ä½é€šæ»¤æ³¢ç»“æ„ä½“
+  * @param[in]      é—´éš”çš„æ—¶é—´ï¼Œå•ä½ s
+  * @retval         è¿”å›ç©º
   */
 void first_order_filter_cali(first_order_filter_type_t *first_order_filter_type, fp32 input)
 {
@@ -134,7 +134,7 @@ void first_order_filter_cali(first_order_filter_type_t *first_order_filter_type,
 	+ first_order_filter_type->frame_period / (first_order_filter_type->num[0] + first_order_filter_type->frame_period) * first_order_filter_type->input;
 }
 
-//¾ø¶ÔÏŞÖÆ
+//ç»å¯¹é™åˆ¶
 void abs_limit(fp32 *num, fp32 Limit)
 {
     if (*num > Limit)
@@ -147,7 +147,7 @@ void abs_limit(fp32 *num, fp32 Limit)
     }
 }
 
-//ÅĞ¶Ï·ûºÅÎ»
+//åˆ¤æ–­ç¬¦å·ä½
 fp32 sign(fp32 value)
 {
     if (value >= 0.0f)
@@ -160,7 +160,7 @@ fp32 sign(fp32 value)
     }
 }
 
-//¸¡µãËÀÇø
+//æµ®ç‚¹æ­»åŒº
 fp32 fp32_deadline(fp32 Value, fp32 minValue, fp32 maxValue)
 {
     if (Value < maxValue && Value > minValue)
@@ -170,7 +170,7 @@ fp32 fp32_deadline(fp32 Value, fp32 minValue, fp32 maxValue)
     return Value;
 }
 
-//int26ËÀÇø
+//int26æ­»åŒº
 int16_t int16_deadline(int16_t Value, int16_t minValue, int16_t maxValue)
 {
     if (Value < maxValue && Value > minValue)
@@ -180,7 +180,7 @@ int16_t int16_deadline(int16_t Value, int16_t minValue, int16_t maxValue)
     return Value;
 }
 
-//ÏŞ·ùº¯Êı
+//é™å¹…å‡½æ•°
 fp32 float_constrain(fp32 Value, fp32 minValue, fp32 maxValue)
 {
     if (Value < minValue)
@@ -191,7 +191,7 @@ fp32 float_constrain(fp32 Value, fp32 minValue, fp32 maxValue)
         return Value;
 }
 
-//ÏŞ·ùº¯Êı
+//é™å¹…å‡½æ•°
 int16_t int16_constrain(int16_t Value, int16_t minValue, int16_t maxValue)
 {
     if (Value < minValue)
@@ -202,7 +202,7 @@ int16_t int16_constrain(int16_t Value, int16_t minValue, int16_t maxValue)
         return Value;
 }
 
-//Ñ­»·ÏŞ·ùº¯Êı
+//å¾ªç¯é™å¹…å‡½æ•°
 fp32 loop_fp32_constrain(fp32 Input, fp32 minValue, fp32 maxValue)
 {
     if (maxValue < minValue)
@@ -229,9 +229,9 @@ fp32 loop_fp32_constrain(fp32 Input, fp32 minValue, fp32 maxValue)
     return Input;
 }
 
-//»¡¶È¸ñÊ½»¯Îª-PI~PI
+//å¼§åº¦æ ¼å¼åŒ–ä¸º-PI~PI
 
-//½Ç¶È¸ñÊ½»¯Îª-180~180
+//è§’åº¦æ ¼å¼åŒ–ä¸º-180~180
 fp32 theta_format(fp32 Ang)
 {
     return loop_fp32_constrain(Ang, -180.0f, 180.0f);
@@ -249,10 +249,10 @@ int float_rounding(float raw)
 }
 
 /**
-  * @brief          ×îĞ¡¶ş³Ë·¨³õÊ¼»¯
-  * @param[in]      ×îĞ¡¶ş³Ë·¨½á¹¹Ìå
-  * @param[in]      Ñù±¾Êı
-  * @retval         ·µ»Ø¿Õ
+  * @brief          æœ€å°äºŒä¹˜æ³•åˆå§‹åŒ–
+  * @param[in]      æœ€å°äºŒä¹˜æ³•ç»“æ„ä½“
+  * @param[in]      æ ·æœ¬æ•°
+  * @retval         è¿”å›ç©º
   */
 void OLS_Init(Ordinary_Least_Squares_t *OLS, uint16_t order)
 {
@@ -268,10 +268,10 @@ void OLS_Init(Ordinary_Least_Squares_t *OLS, uint16_t order)
 }
 
 /**
-  * @brief          ×îĞ¡¶ş³Ë·¨ÄâºÏ
-  * @param[in]      ×îĞ¡¶ş³Ë·¨½á¹¹Ìå
-  * @param[in]      ĞÅºÅĞÂÑù±¾¾àÉÏÒ»¸öÑù±¾Ê±¼ä¼ä¸ô
-  * @param[in]      ĞÅºÅÖµ
+  * @brief          æœ€å°äºŒä¹˜æ³•æ‹Ÿåˆ
+  * @param[in]      æœ€å°äºŒä¹˜æ³•ç»“æ„ä½“
+  * @param[in]      ä¿¡å·æ–°æ ·æœ¬è·ä¸Šä¸€ä¸ªæ ·æœ¬æ—¶é—´é—´éš”
+  * @param[in]      ä¿¡å·å€¼
   */
 void OLS_Update(Ordinary_Least_Squares_t *OLS, float deltax, float y)
 {
@@ -310,11 +310,11 @@ void OLS_Update(Ordinary_Least_Squares_t *OLS, float deltax, float y)
 }
 
 /**
-  * @brief          ×îĞ¡¶ş³Ë·¨ÌáÈ¡ĞÅºÅÎ¢·Ö
-  * @param[in]      ×îĞ¡¶ş³Ë·¨½á¹¹Ìå
-  * @param[in]      ĞÅºÅĞÂÑù±¾¾àÉÏÒ»¸öÑù±¾Ê±¼ä¼ä¸ô
-  * @param[in]      ĞÅºÅÖµ
-  * @retval         ·µ»ØĞ±ÂÊk
+  * @brief          æœ€å°äºŒä¹˜æ³•æå–ä¿¡å·å¾®åˆ†
+  * @param[in]      æœ€å°äºŒä¹˜æ³•ç»“æ„ä½“
+  * @param[in]      ä¿¡å·æ–°æ ·æœ¬è·ä¸Šä¸€ä¸ªæ ·æœ¬æ—¶é—´é—´éš”
+  * @param[in]      ä¿¡å·å€¼
+  * @retval         è¿”å›æ–œç‡k
   */
 float OLS_Derivative(Ordinary_Least_Squares_t *OLS, float deltax, float y)
 {
@@ -355,9 +355,9 @@ float OLS_Derivative(Ordinary_Least_Squares_t *OLS, float deltax, float y)
 }
 
 /**
-  * @brief          »ñÈ¡×îĞ¡¶ş³Ë·¨ÌáÈ¡ĞÅºÅÎ¢·Ö
-  * @param[in]      ×îĞ¡¶ş³Ë·¨½á¹¹Ìå
-  * @retval         ·µ»ØĞ±ÂÊk
+  * @brief          è·å–æœ€å°äºŒä¹˜æ³•æå–ä¿¡å·å¾®åˆ†
+  * @param[in]      æœ€å°äºŒä¹˜æ³•ç»“æ„ä½“
+  * @retval         è¿”å›æ–œç‡k
   */
 float Get_OLS_Derivative(Ordinary_Least_Squares_t *OLS)
 {
@@ -365,11 +365,11 @@ float Get_OLS_Derivative(Ordinary_Least_Squares_t *OLS)
 }
 
 /**
-  * @brief          ×îĞ¡¶ş³Ë·¨Æ½»¬ĞÅºÅ
-  * @param[in]      ×îĞ¡¶ş³Ë·¨½á¹¹Ìå
-  * @param[in]      ĞÅºÅĞÂÑù±¾¾àÉÏÒ»¸öÑù±¾Ê±¼ä¼ä¸ô
-  * @param[in]      ĞÅºÅÖµ
-  * @retval         ·µ»ØÆ½»¬Êä³ö
+  * @brief          æœ€å°äºŒä¹˜æ³•å¹³æ»‘ä¿¡å·
+  * @param[in]      æœ€å°äºŒä¹˜æ³•ç»“æ„ä½“
+  * @param[in]      ä¿¡å·æ–°æ ·æœ¬è·ä¸Šä¸€ä¸ªæ ·æœ¬æ—¶é—´é—´éš”
+  * @param[in]      ä¿¡å·å€¼
+  * @retval         è¿”å›å¹³æ»‘è¾“å‡º
   */
 float OLS_Smooth(Ordinary_Least_Squares_t *OLS, float deltax, float y)
 {
@@ -411,9 +411,9 @@ float OLS_Smooth(Ordinary_Least_Squares_t *OLS, float deltax, float y)
 }
 
 /**
-  * @brief          »ñÈ¡×îĞ¡¶ş³Ë·¨Æ½»¬ĞÅºÅ
-  * @param[in]      ×îĞ¡¶ş³Ë·¨½á¹¹Ìå
-  * @retval         ·µ»ØÆ½»¬Êä³ö
+  * @brief          è·å–æœ€å°äºŒä¹˜æ³•å¹³æ»‘ä¿¡å·
+  * @param[in]      æœ€å°äºŒä¹˜æ³•ç»“æ„ä½“
+  * @retval         è¿”å›å¹³æ»‘è¾“å‡º
   */
 float Get_OLS_Smooth(Ordinary_Least_Squares_t *OLS)
 {

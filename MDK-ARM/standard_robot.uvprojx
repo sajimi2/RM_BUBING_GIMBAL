@@ -10,13 +10,13 @@
       <TargetName>standard_robot</TargetName>
       <ToolsetNumber>0x4</ToolsetNumber>
       <ToolsetName>ARM-ADS</ToolsetName>
-      <pCCUsed>5060960::V5.06 update 7 (build 960)::.\ARMCC</pCCUsed>
+      <pCCUsed>5060960::V5.06 update 7 (build 960)::.\V5Compiler</pCCUsed>
       <uAC6>0</uAC6>
       <TargetOption>
         <TargetCommonOption>
           <Device>STM32F407IGHx</Device>
           <Vendor>STMicroelectronics</Vendor>
-          <PackID>Keil.STM32F4xx_DFP.2.17.1</PackID>
+          <PackID>Keil.STM32F4xx_DFP.3.1.1</PackID>
           <PackURL>https://www.keil.com/pack/</PackURL>
           <Cpu>IRAM(0x20000000-0x2001BFFF) IRAM2(0x2001C000-0x2001FFFF) IROM(0x8000000-0x80FFFFF) CLOCK(25000000) FPU2 CPUTYPE("Cortex-M4")</Cpu>
           <FlashUtilSpec></FlashUtilSpec>
@@ -463,6 +463,16 @@
               <FileName>NX_communicate.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\Task\NX_communicate.h</FilePath>
+            </File>
+            <File>
+              <FileName>Reset_task.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Task\Reset_task.c</FilePath>
+            </File>
+            <File>
+              <FileName>Reset_task.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Task\Reset_task.h</FilePath>
             </File>
           </Files>
         </Group>

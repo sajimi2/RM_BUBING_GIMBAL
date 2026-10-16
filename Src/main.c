@@ -138,7 +138,6 @@ int main(void)
   HAL_TIM_Base_Start_IT(&htim6);
   can_filter_init();
   remote_control_init();
-  usart1_tx_dma_init();
   NXrecieve_Init();
   DWT_Init(168);
   while (BMI088_init(&hspi1, 1) != BMI088_NO_ERROR)
