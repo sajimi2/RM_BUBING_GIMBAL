@@ -24,6 +24,12 @@ CAN 两个检查点中的 `nx_p->mode != 0` 条件仍被注释，未在归档时
 历史串口绝对角版与 CAN 绝对角适配版使用不同协议，后者不是前者的逐文件还原。
 尚未确认上述任何源码检查点就是曾出现小陀螺偏移时的板上固件。
 
+## 相对增量试验分支
+
+`fix/vision-relative-delta` 从绝对角 CMake 基线建立，按视觉相对偏差更新目标：
+`target = current_INS + decoded_delta`。旧标签保持不变。
+接口、对照命令和验证边界见 [增量修正记录](VISION_RELATIVE_DELTA.md)。
+
 ## 保存的旧固件
 
 `archives/firmware/2026-10-15-local-keil/` 保存修改前备份中的 AXF、HEX，

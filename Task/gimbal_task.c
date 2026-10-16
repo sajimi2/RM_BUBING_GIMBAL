@@ -194,8 +194,9 @@ void gimbal_task(void const *pvParameters)
     rc_p = get_remote_control_point(); // 获取遥控器数据指针
     nx_p = get_nx_control_point();     // 视觉数据指针
 
-    delta_pitch = nx_p->pitch;
-    delta_yaw = nx_p->yaw;
+    // 尚未消费视觉帧，增量观测值先清零（单位：弧度）。
+    delta_pitch = 0.0f;
+    delta_yaw = 0.0f;
 
     // 初始化延迟
     osDelay(500);
@@ -458,21 +459,6 @@ void getControlAngles(void)
 	
     // 自动控制模式
 
-    // 绝对角复现：沿用 CAN 的角度缩放和 Pitch 取反约定，目标须与 INS 反馈同参考系。
-    const fp32 vision_pitch_target = -(fp32)(nx_p->pitch) * 3.1415926f / 32767;
-    const fp32 vision_yaw_target = (fp32)(nx_p->yaw) * 3.1415926f / 32767;
-    // 保留误差变量供观测；新视觉帧直接覆盖目标，不再累加误差。
-    delta_pitch = vision_pitch_target - PitchCtrl.nowAbsoluteAngle;
-    delta_yaw = vision_yaw_target - YawCtrl.nowAbsoluteAngle;
-//	if(delta_pitch <= target && delta_pitch >= target)
-//	{
-//		delta_pitch = 0;
-//	}
-//	
-//	if(delta_yaw <= target && delta_yaw >= -target)
-//	{
-//		delta_yaw = 0;
-//	}
 	// LYL
     if (robotIsAuto() || rc_p->rc.s[1]==2 )
     {
@@ -480,11 +466,14 @@ void getControlAngles(void)
         if (data_ready == 1 )//&& nx_p->mode != 0)
         {
             
-            // Pitch轴自动控制
-            PitchCtrl.want_AbsoluteAngleCtrl = vision_pitch_target; // 每个新帧给定绝对目标，零角度也有效
+            // 视觉发来相对当前朝向的偏差；沿用 CAN 缩放及 Pitch 取反约定。
+            // 仅消费新帧时更新，delta_* 记录最近一次使用的视觉增量（弧度）。
+            delta_pitch = -(fp32)(nx_p->pitch) * 3.1415926f / 32767;
+            delta_yaw = (fp32)(nx_p->yaw) * 3.1415926f / 32767;
 
-            // Yaw轴自动控制
-            YawCtrl.want_AbsoluteAngleCtrl = vision_yaw_target; // 重复同一目标不产生额外累加
+            // 以本控制周期的 INS 反馈为基准，零增量也有效；不叠加旧目标。
+            PitchCtrl.want_AbsoluteAngleCtrl = PitchCtrl.nowAbsoluteAngle + delta_pitch;
+            YawCtrl.want_AbsoluteAngleCtrl = radFormat(YawCtrl.nowAbsoluteAngle + delta_yaw);
 				
             data_ready = 0;
         }

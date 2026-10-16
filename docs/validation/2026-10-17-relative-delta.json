@@ -1,0 +1,94 @@
+{
+  "date": "2026-10-17",
+  "branch": "fix/vision-relative-delta",
+  "base_commit": "8557503d9f7b88983cb137382976c544788cde4c",
+  "source_worktree_sha256": {
+    "Task/gimbal_task.c": "452ad5b824532ef1ccc6e3446b1fc4fcfb9d19b41536e40d5551b051eee4401b",
+    "Task/NX_communicate.h": "73e2acdd7c160f598971a955c2305f5977be1382727cdccbfd178f6d2799a18f",
+    "tools/check_vision_relative.py": "f3e6b120d97f0ab93afe59fd8b9ef593506b3eb92dfc383151b32630d18033c8"
+  },
+  "host_checks": {
+    "result": "PASS: 28 checks, 0 failures",
+    "compiler": "C:\\c-dev\\w64devkit\\bin\\gcc.exe",
+    "negative_controls": [
+      {
+        "ref": "3f5e28588d08a5696ac0fc6c290e46a8c9537cee",
+        "returncode": 1,
+        "expected_failure": true,
+        "summary": "FAIL: 28 checks, 17 failures"
+      },
+      {
+        "ref": "8557503d9f7b88983cb137382976c544788cde4c",
+        "returncode": 1,
+        "expected_failure": true,
+        "summary": "FAIL: 28 checks, 17 failures"
+      }
+    ]
+  },
+  "builds": [
+    {
+      "kind": "debug",
+      "exit_code": 0,
+      "artifacts": {
+        "build\\Debug\\standard_robot.elf": {
+          "sha256": "2fc00b7447322950a150eeaf116e2cac791180547eedb5fb41ecbe5a4c5ea2e5",
+          "size": 2481040
+        },
+        "build\\Debug\\standard_robot.hex": {
+          "sha256": "55ccc658e4839e9c6f429d18df47e9650b76c60323d060a7ed8fe6c78029b30a",
+          "size": 226036
+        },
+        "build\\Debug\\standard_robot.bin": {
+          "sha256": "cf63be9df68e378ec7f5b34aa6803923c90bdfa1bd06bffdabf0ea82dd9a3e5c",
+          "size": 80340
+        }
+      }
+    },
+    {
+      "kind": "release",
+      "exit_code": 0,
+      "artifacts": {
+        "build\\Release\\standard_robot.elf": {
+          "sha256": "a0a6742ea565b0b2cb0faa312184e614892399ea2507dd913b6784cef9fa0f92",
+          "size": 633548
+        },
+        "build\\Release\\standard_robot.hex": {
+          "sha256": "9895bc172caf6f418b1669d94ea93b10758a8bd17901477530cdb7d917118192",
+          "size": 216946
+        },
+        "build\\Release\\standard_robot.bin": {
+          "sha256": "d153a6a9ce3b6cba14b62cd69716e0ebbbaeb28cebb37dbb9014baa73fb4c636",
+          "size": 77108
+        }
+      }
+    },
+    {
+      "kind": "keil",
+      "exit_code": 0,
+      "artifacts": {
+        "MDK-ARM\\standard_robot\\standard_robot.axf": {
+          "sha256": "d696d4a3e908338d8c109cc4b5a4604c1be1a6e911d01f4ddc3b999b9116b0a4",
+          "size": 1691816
+        },
+        "MDK-ARM\\standard_robot\\standard_robot.hex": {
+          "sha256": "f360bba66a22eea736e088a2f9676e5ba928ee8771c62c0b6f14335a4d12cf7c",
+          "size": 165177
+        }
+      }
+    }
+  ],
+  "toolchains": {
+    "gcc": "GNU Tools for STM32 14.3.1+st.2",
+    "keil": "ARMCC 5.06 update 7 build 960"
+  },
+  "flashed": false,
+  "hardware_tested": false,
+  "notes": [
+    "Independent worktree from archived baseline; concurrent original-workspace changes are excluded.",
+    "Host checks execute extracted source functions with simulated inputs, not a complete firmware runtime.",
+    "Pre-existing compiler warnings remain; GCC Debug/Release and Keil full rebuild passed.",
+    "Firmware paths refer to local ignored build products; hashes identify this build only.",
+    "No image timestamp alignment or communication latency compensation was added."
+  ],
+  "tag": "experiment/2026-10-17-can-relative-delta"
+}
