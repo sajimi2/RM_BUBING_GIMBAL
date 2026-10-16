@@ -84,7 +84,16 @@ DSP 1.7.0 头文件匹配的实现，相关许可证随文件保留。
 `No ST-Link detected`，尚未完成下载、断点及实车行为验证。
 更换编译器会改变二进制和执行时序；复现旧现象时应记录使用的编译器及固件版本。
 
-当前源码是视觉绝对角目标版本，视觉端须同步使用与板端 INS 对应的绝对角约定。
+当前源码适配视觉现有 `TrackerNode -> mpc_can_sender` 绝对角协议：
+CAN 两轴均按 `raw * PI / 32767` 解码为 INS 同向目标，板端以角度环、速度环串级控制。
+本次仅修改下位机，视觉源码保持原样；方向依据和验证见 [绝对角适配说明](docs/VISION_ABSOLUTE_ADAPTER.md)。
+正负目标表现异常时，使用 [视觉 yaw 诊断说明](docs/VISION_YAW_DIAGNOSIS.md)
+中的 `vision_debug` 观察接收值、采用值及实际目标。
+当前默认使用 [BT24 + 安卓手机蓝牙助手](docs/BLUETOOTH_VOFA.md)：
+三针 UART1 接口（软件 USART6，TX PG14）输出 9600 baud、2 Hz 可读文本，角度单位 rad。
+该三针口没有电源脚，BT24 的 VCC 需另接 5V，模块与 C 板共地。
+已有手机接收软件即可查看；需要重新烧录本版固件，本工程数据的无线接收尚未实测。
+同时保留 ST-Link 单步流程，以及可切换的电脑 VOFA JustFloat 格式。
 
 ## 保留的 Keil 流程
 

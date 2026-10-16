@@ -489,6 +489,16 @@
               <FileType>5</FileType>
               <FilePath>..\Debug\usart6_debug.h</FilePath>
             </File>
+            <File>
+              <FileName>vision_telemetry.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Debug\vision_telemetry.c</FilePath>
+            </File>
+            <File>
+              <FileName>vision_telemetry.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Debug\vision_telemetry.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

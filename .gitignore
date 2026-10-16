@@ -42,3 +42,9 @@ JLinkLog.txt
 # 经人工确认的历史固件存档；日常编译产物仍然忽略
 !/archives/firmware/**/*.axf
 !/archives/firmware/**/*.hex
+
+# 本地撤回记录可能包含视觉工程快照，不进入电控仓库。
+/archives/interface/
+# 重复源码 ZIP 留在本地；已验证的电控固件包单独归档。
+/archives/absolute_adapter/**/*.zip
+!/archives/absolute_adapter/**/board_firmware.zip

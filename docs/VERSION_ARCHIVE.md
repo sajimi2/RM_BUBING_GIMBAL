@@ -6,7 +6,7 @@
 `main` 是后续开发入口；下列 `archive/` 标签表示固定存档，后续不移动或覆盖。
 标签名称中的日期表示被记录版本的日期，存档提交本身在整理当天创建。
 
-## 四个检查点
+## 版本检查点
 
 | 标签 | 视觉接口与目标更新 | 构建方式 | 来源与验证边界 |
 | --- | --- | --- | --- |
@@ -14,10 +14,20 @@
 | `archive/2026-10-16-can-error-accumulation` | CAN，`int16_t`；`target += decoded_angle - INS_angle` | Keil ARMCC 5 | 从修改前副本建立，提交 `3f5e28588d08a5696ac0fc6c290e46a8c9537cee`；保留乱码修复、VS Code 配置及当时已有改动；已核对关键文件 SHA-256，未上车 |
 | `archive/2026-10-16-can-absolute-keil` | CAN，`int16_t`；新帧直接 `target = decoded_angle`；零角度有效 | Keil ARMCC 5 | 提交 `994d57404073dca3b02a4328521afc7c5755e402`；相对上一检查点仅改动 `Task/gimbal_task.c` 和 `Task/NX_communicate.h`；已通过单文件编译和离线目标更新检查，未上车 |
 | `archive/2026-10-17-can-absolute-cmake` | 与上一检查点相同的绝对目标语义 | CMake/GCC；保留 Keil | 当前开发基线，包含 GCC 兼容声明、ABI 检查、工具链、VS Code 构建及调试入口；验证结果见下文 |
+| `archive/2026-10-17-can-absolute-adapted` | 新帧原子快照后直接给定绝对目标；Pitch 去掉额外取反 | CMake/GCC；保留 Keil 工程 | 下位机适配现有视觉，包含 CAN 帧检查、Yaw 诊断与 BT24 文本遥测；19 组适配用例及原有回归通过，Debug/Release 编译通过，未烧录 |
 
-CAN 角度解码沿用：`yaw = raw_yaw * PI / 32767`，
+截至 `can-absolute-cmake` 的历史 CAN 检查点角度解码为：`yaw = raw_yaw * PI / 32767`，
 `pitch = -raw_pitch * PI / 32767`。绝对目标必须与 INS 反馈的参考系、零点和正方向对应。
 CAN 两个检查点中的 `nx_p->mode != 0` 条件仍被注释，未在归档时改变此行为。
+
+`can-absolute-adapted` 检查点只修改下位机：依据未修改的视觉发送代码，将 Pitch 解码改为
+`pitch = raw_pitch * PI / 32767`，去掉板端多余取反。旧标签保持不变。
+具体协议、源码证据及本地对照记录见 [绝对角适配说明](VISION_ABSOLUTE_ADAPTER.md)。
+
+最近检查点的电控固件包、前后回归结果及哈希位于
+`archives/absolute_adapter/20261017_021539/`。重复源码 ZIP 和已撤回的双端修改记录仅保留在本地。
+要回到修复前的绝对角跟随版，使用 `archive/2026-10-17-can-absolute-cmake`（`8557503`）。
+切换后重新构建；要返回本次修复版，切回 `main` 或使用 `can-absolute-adapted` 完整标签名。
 
 “误差累加”描述的是源码实际公式，不把该版本命名为“纯增量输入”。
 若视觉发的是相对当前位置的偏差，需要另行明确接口契约，不能仅凭 `delta` 变量名或 `+=` 判断。

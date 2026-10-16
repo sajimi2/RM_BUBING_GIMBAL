@@ -164,7 +164,6 @@ static enum RobotState_e lastMode;
 
 // 控制指针
 static const RC_ctrl_t *rc_p;
-static const CAN_Send_to_MCU *nx_p;
 
 extern volatile uint8_t rc_online;
 extern int16_t *getTriggerCurrentP(void);
@@ -192,10 +191,6 @@ void gimbal_task(void const *pvParameters)
     initGimbalCtrl();
     robotMode = getRobotPresentMode();
     rc_p = get_remote_control_point(); // 获取遥控器数据指针
-    nx_p = get_nx_control_point();     // 视觉数据指针
-
-    delta_pitch = nx_p->pitch;
-    delta_yaw = nx_p->yaw;
 
     // 初始化延迟
     osDelay(500);
@@ -238,6 +233,13 @@ void gimbal_task(void const *pvParameters)
 		else
 		{
 		}
+
+        // 记录本周期真正发出的 Yaw 指令；只观测，不参与控制。
+        vision_debug.yaw_target_rad = YawCtrl.want_AbsoluteAngleCtrl;
+        vision_debug.yaw_feedback_rad = YawCtrl.nowAbsoluteAngle;
+        vision_debug.yaw_error_rad = YawCtrl.agl_pid.error[0];
+        vision_debug.yaw_output = YawCtrl.Volt_out;
+        vision_debug.remote_online = rc_online;
 
         // 发送控制指令到CAN总线
         CAN_cmd_gimbal(YawCtrl.Volt_out, PitchCtrl.Volt_out, *triggerCurrentP, 0);
@@ -434,6 +436,7 @@ void getControlAngles(void)
 	
     if (*robotMode == RobotState_e_Powerless)
     {
+        vision_debug.auto_active = 0;
 
         // 设置无力标志
         YawCtrl.nopowerflag = 1; // 1表示无力，电机输出为零
@@ -458,39 +461,29 @@ void getControlAngles(void)
 	
     // 自动控制模式
 
-    // 绝对角复现：沿用 CAN 的角度缩放和 Pitch 取反约定，目标须与 INS 反馈同参考系。
-    const fp32 vision_pitch_target = -(fp32)(nx_p->pitch) * 3.1415926f / 32767;
-    const fp32 vision_yaw_target = (fp32)(nx_p->yaw) * 3.1415926f / 32767;
-    // 保留误差变量供观测；新视觉帧直接覆盖目标，不再累加误差。
-    delta_pitch = vision_pitch_target - PitchCtrl.nowAbsoluteAngle;
-    delta_yaw = vision_yaw_target - YawCtrl.nowAbsoluteAngle;
-//	if(delta_pitch <= target && delta_pitch >= target)
-//	{
-//		delta_pitch = 0;
-//	}
-//	
-//	if(delta_yaw <= target && delta_yaw >= -target)
-//	{
-//		delta_yaw = 0;
-//	}
-	// LYL
     if (robotIsAuto() || rc_p->rc.s[1]==2 )
     {
-		// LYL
-        if (data_ready == 1 )//&& nx_p->mode != 0)
+        vision_debug.auto_active = 1;
+        CAN_Send_to_MCU vision_frame;
+        if (NX_TakeControlFrame(&vision_frame))
         {
-            
+            // 适配现有 Tracker -> mpc_can_sender：CAN 两轴均已转换为 INS 同向绝对角。
+            // 视觉发送端已处理 Pitch 方向，板端只解码，不能再次取反或累加当前角度。
+            const fp32 vision_pitch_target = (fp32)vision_frame.pitch * 3.1415926f / 32767;
+            const fp32 vision_yaw_target = (fp32)vision_frame.yaw * 3.1415926f / 32767;
+
             // Pitch轴自动控制
             PitchCtrl.want_AbsoluteAngleCtrl = vision_pitch_target; // 每个新帧给定绝对目标，零角度也有效
 
             // Yaw轴自动控制
             YawCtrl.want_AbsoluteAngleCtrl = vision_yaw_target; // 重复同一目标不产生额外累加
-				
-            data_ready = 0;
+            vision_debug.applied_yaw_raw = vision_frame.yaw;
+            ++vision_debug.applied_count;
         }
     } 
 	else
 	{
+        vision_debug.auto_active = 0;
         // Pitch轴手动控制（积分累加方式）
         PitchCtrl.want_AbsoluteAngleCtrl +=
             1 * pitch_channel * PITCH_RC_SEN        // 遥控器控制
@@ -511,6 +504,10 @@ void getControlAngles(void)
             YawCtrl.want_AbsoluteAngleCtrl += 2 * PI;
         }
     }
+
+    // 误差观测使用实际采用的目标，不再读取可能正被中断更新的报文。
+    delta_pitch = PitchCtrl.want_AbsoluteAngleCtrl - PitchCtrl.nowAbsoluteAngle;
+    delta_yaw = YawCtrl.want_AbsoluteAngleCtrl - YawCtrl.nowAbsoluteAngle;
 
     // 记录当前模式，用于下一次状态转换判断
     lastMode = *robotMode;

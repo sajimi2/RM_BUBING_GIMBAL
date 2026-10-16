@@ -67,7 +67,7 @@ enum TriggerMode_e{
 	TriggerMode_e_StuckSolve,
 };
 
-static const CAN_Send_to_MCU *nx_p;
+static const volatile CAN_Send_to_MCU *nx_p;
 static const RC_ctrl_t *rc_p;
 static int16_t trigger_state=3;//拨杆状态
 static int16_t wheel=0;		   //拨轮值

@@ -9,6 +9,7 @@ set(FIRMWARE_SOURCES
     Task/NX_communicate.c
     Task/Reset_task.c
     Debug/usart6_debug.c
+    Debug/vision_telemetry.c
     Control/pid.c
     Control/controller.c
     Applications/CAN_recieve_send.c

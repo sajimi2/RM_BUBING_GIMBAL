@@ -28,8 +28,6 @@ static uint8_t              gimbal_can_send_data[8];
 static CAN_TxHeaderTypeDef  shoot_tx_message;
 static uint8_t              shoot_can_send_data[8];
 
-extern CAN_Send_to_MCU NX_data;
-
 /**
   * @brief          hal库CAN回调函数,接收电机数据
   * @param[in]      hcan:CAN句柄指针
@@ -40,7 +38,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//收取回调，
     CAN_RxHeaderTypeDef rx_header;
     uint8_t rx_data[8];
 
-    HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data);
+    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data) != HAL_OK)
+        return;
 
     switch (rx_header.StdId)
     {
@@ -80,6 +79,9 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//收取回调，
 		}
 		case 0x005:
 {
+    /* 视觉协议固定为标准数据帧的 8 字节，拒绝不完整或远程帧。 */
+    if (rx_header.IDE != CAN_ID_STD || rx_header.RTR != CAN_RTR_DATA || rx_header.DLC != 8)
+        break;
     typedef union
     {
         CAN_Send_to_MCU NX_data;
@@ -108,6 +110,21 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//收取回调，
     data_u.data[7] = rx_data[7];
 
     NX_data = data_u.NX_data;
+    vision_debug.rx_yaw_raw = data_u.NX_data.yaw;
+    vision_debug.rx_bus = (hcan == &hcan2) ? 2 : 1;
+    for (uint8_t byte = 0; byte < 8; ++byte)
+        vision_debug.rx_bytes[byte] = rx_data[byte];
+    if (data_u.NX_data.yaw > 0)
+    {
+        ++vision_debug.positive_count;
+        vision_debug.last_positive_raw = data_u.NX_data.yaw;
+    }
+    else if (data_u.NX_data.yaw < 0)
+    {
+        ++vision_debug.negative_count;
+        vision_debug.last_negative_raw = data_u.NX_data.yaw;
+    }
+    ++vision_debug.rx_count;
     data_ready = 1;
 	
 	fire_t = NX_data.fire;

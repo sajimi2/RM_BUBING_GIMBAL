@@ -1,3 +1,7 @@
 # 固件存档必须逐字节保存，禁止 Git 的换行转换改变下载文件及其 SHA-256。
 archives/firmware/**/*.hex -text
 archives/firmware/**/*.axf binary
+
+# 归档补丁的上下文行自带空格前缀，按原始字节保存，不当作源文件空白错误。
+archives/absolute_adapter/**/*.patch -text -whitespace
+archives/absolute_adapter/**/board_firmware.zip binary

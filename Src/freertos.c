@@ -33,6 +33,7 @@
 #include "shoot_task.h"
 #include "NX_communicate.h"
 #include "Reset_task.h"
+#include "vision_telemetry.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -134,7 +135,7 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the thread(s) */
   /* definition and creation of test */
-  osThreadDef(test, test_task, osPriorityNormal, 0, 128);
+  osThreadDef(test, test_task, osPriorityNormal, 0, 256);
   testHandle = osThreadCreate(osThread(test), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
@@ -177,7 +178,9 @@ __weak void test_task(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    // 复用原空闲测试任务，优先级低于云台和 INS；串口发送不阻塞该任务。
+    VisionTelemetry_Poll();
+    osDelay(10);
   }
   /* USER CODE END test_task */
 }

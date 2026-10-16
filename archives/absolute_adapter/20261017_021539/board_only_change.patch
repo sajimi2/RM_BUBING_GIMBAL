@@ -1,0 +1,368 @@
+--- a/Task/gimbal_task.c
++++ b/Task/gimbal_task.c
+@@ -467,8 +467,9 @@
+         CAN_Send_to_MCU vision_frame;
+         if (NX_TakeControlFrame(&vision_frame))
+         {
+-            // 绝对角复现：沿用有符号缩放和 Pitch 取反，目标须与 INS 同参考系。
+-            const fp32 vision_pitch_target = -(fp32)vision_frame.pitch * 3.1415926f / 32767;
++            // 适配现有 Tracker -> mpc_can_sender：CAN 两轴均已转换为 INS 同向绝对角。
++            // 视觉发送端已处理 Pitch 方向，板端只解码，不能再次取反或累加当前角度。
++            const fp32 vision_pitch_target = (fp32)vision_frame.pitch * 3.1415926f / 32767;
+             const fp32 vision_yaw_target = (fp32)vision_frame.yaw * 3.1415926f / 32767;
+ 
+             // Pitch轴自动控制
+--- a/Task/NX_communicate.h
++++ b/Task/NX_communicate.h
+@@ -3,12 +3,13 @@
+ 
+ #include "struct_typedef.h"
+ 
+-// 上位机 -> MCU
++// 上位机 -> MCU：现有 Tracker -> mpc_can_sender 的标准 CAN 0x005、DLC=8、小端报文。
++// 视觉发送端完成方向转换；板端将两轴有符号整数直接解码为 INS 同向绝对弧度。
+ typedef struct __attribute__((packed))
+ {
+     uint8_t mode;    // 0: 不控制, 1: 控制云台但不开火，2: 控制云台且开火
+     int16_t yaw;   // 绝对目标角：板端解码为 yaw * PI / 32767，须与 INS.Yaw 同参考系
+-    int16_t pitch; // 绝对目标角：板端解码为 -pitch * PI / 32767，须与 INS.Pitch 同参考系
++    int16_t pitch; // 绝对目标角：板端解码为 pitch * PI / 32767，须与 INS.Pitch 同参考系
+ 	uint8_t fire;
+ 	int16_t rev;
+ } CAN_Send_to_MCU;
+--- a/README.md
++++ b/README.md
+@@ -84,7 +84,9 @@
+ `No ST-Link detected`，尚未完成下载、断点及实车行为验证。
+ 更换编译器会改变二进制和执行时序；复现旧现象时应记录使用的编译器及固件版本。
+ 
+-当前源码是视觉绝对角目标版本，视觉端须同步使用与板端 INS 对应的绝对角约定。
++当前源码适配视觉现有 `TrackerNode -> mpc_can_sender` 绝对角协议：
++CAN 两轴均按 `raw * PI / 32767` 解码为 INS 同向目标，板端以角度环、速度环串级控制。
++本次仅修改下位机，视觉源码保持原样；方向依据和验证见 [绝对角适配说明](docs/VISION_ABSOLUTE_ADAPTER.md)。
+ 正负目标表现异常时，使用 [视觉 yaw 诊断说明](docs/VISION_YAW_DIAGNOSIS.md)
+ 中的 `vision_debug` 观察接收值、采用值及实际目标。
+ 当前默认使用 [BT24 + 安卓手机蓝牙助手](docs/BLUETOOTH_VOFA.md)：
+--- a/docs/VERSION_ARCHIVE.md
++++ b/docs/VERSION_ARCHIVE.md
+@@ -15,9 +15,13 @@
+ | `archive/2026-10-16-can-absolute-keil` | CAN，`int16_t`；新帧直接 `target = decoded_angle`；零角度有效 | Keil ARMCC 5 | 提交 `994d57404073dca3b02a4328521afc7c5755e402`；相对上一检查点仅改动 `Task/gimbal_task.c` 和 `Task/NX_communicate.h`；已通过单文件编译和离线目标更新检查，未上车 |
+ | `archive/2026-10-17-can-absolute-cmake` | 与上一检查点相同的绝对目标语义 | CMake/GCC；保留 Keil | 当前开发基线，包含 GCC 兼容声明、ABI 检查、工具链、VS Code 构建及调试入口；验证结果见下文 |
+ 
+-CAN 角度解码沿用：`yaw = raw_yaw * PI / 32767`，
++上述历史 CAN 检查点的角度解码为：`yaw = raw_yaw * PI / 32767`，
+ `pitch = -raw_pitch * PI / 32767`。绝对目标必须与 INS 反馈的参考系、零点和正方向对应。
+ CAN 两个检查点中的 `nx_p->mode != 0` 条件仍被注释，未在归档时改变此行为。
++
++当前工作区已另做只修改下位机的适配：依据未修改的视觉发送代码，将 Pitch 解码改为
++`pitch = raw_pitch * PI / 32767`，去掉板端多余取反。旧标签保持不变。
++具体协议、源码证据及本地对照记录见 [绝对角适配说明](VISION_ABSOLUTE_ADAPTER.md)。
+ 
+ “误差累加”描述的是源码实际公式，不把该版本命名为“纯增量输入”。
+ 若视觉发的是相对当前位置的偏差，需要另行明确接口契约，不能仅凭 `delta` 变量名或 `+=` 判断。
+--- /dev/null
++++ b/tools/check_vision_absolute_adapter.py
+@@ -0,0 +1,210 @@
++"""只读执行现有视觉编码/发送函数，验证板端绝对角与双环 PID 适配。
++
++python tools/check_vision_absolute_adapter.py --vision <视觉目录> --gcc gcc
++依赖 numpy、主机 GCC。仅使用内存报文和模拟反馈，不启动 ROS，不连接 CAN。
++所有测试输出写入电控 build/absolute_adapter_check，视觉文件不会被导入或写入。
++"""
++from pathlib import Path
++from types import SimpleNamespace
++import argparse
++import ast
++import hashlib
++import json
++import math
++import re
++import struct
++import subprocess
++import time
++
++import numpy as np
++
++BOARD = Path(__file__).resolve().parents[1]
++parser = argparse.ArgumentParser(description=__doc__)
++parser.add_argument('--vision', type=Path, required=True)
++parser.add_argument('--gcc', default='gcc')
++parser.add_argument('--report', default='results.json')
++args = parser.parse_args()
++VISION = args.vision.resolve()
++OUT = BOARD / 'build/absolute_adapter_check'
++OUT.mkdir(parents=True, exist_ok=True)
++hashes = {}
++
++
++def read(path):
++    data = path.read_bytes()
++    hashes[str(path)] = hashlib.sha256(data).hexdigest()
++    return data.decode('utf-8-sig').replace('\r\n', '\n')
++
++
++def execute(nodes, env, filename):
++    exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])), filename, 'exec'), env)
++
++
++def load_class(relative, name, env, methods):
++    tree = ast.parse(read(VISION / relative))
++    node = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == name)
++    node.bases = []
++    node.body = [n for n in node.body if isinstance(n, ast.FunctionDef) and n.name in methods]
++    assert len(node.body) == len(methods)
++    execute([node], env, relative)
++    return env[name]
++
++
++signs = {}
++for node in ast.parse(read(VISION / 'tasks/config/config.py')).body:
++    if isinstance(node, ast.Assign):
++        for target in node.targets:
++            if isinstance(target, ast.Name) and target.id in ('CAN_YAW_SIGN', 'CAN_PITCH_SIGN'):
++                signs[target.id] = ast.literal_eval(node.value)
++ns = dict(np=np, math=math, time=time, struct=struct, RAD_FULL_SCALE=np.pi,
++          cfg=SimpleNamespace(**signs), MpcControl=SimpleNamespace)
++sender_cls = load_class('tasks/mpc/mpc_can_sender.py', 'MpcCanSender', ns, {'create_can_frame', 'control_callback'})
++controller_cls = load_class('tasks/tracker/gimbal_controller.py', 'GimbalController', ns, {'encode_angle_for_mcu'})
++tracker_cls = load_class('tasks/tracker/TrackerNode.py', 'TrackerNode', ns, {'publish_mpc_speed'})
++selector_cls = load_class('tasks/tracker/armor_selector.py', 'ArmorSelector', ns, {'__init__', 'compute_gimbal_aim_fast'})
++exec(compile(read(VISION / 'tasks/tracker/transform_utils.py'), 'transform_utils.py', 'exec'), ns)
++tracker_tree = ast.parse(read(VISION / 'tasks/tracker/TrackerNode.py'))
++
++
++def feedback_to_visual(yaw, pitch):
++    env = {'msg': SimpleNamespace(gimbal_yaw=yaw, gimbal_pitch=pitch)}
++    for name in ('gimbal_yaw', 'gimbal_pitch'):
++        node = next(n for n in ast.walk(tracker_tree) if isinstance(n, ast.Assign)
++                    and any(isinstance(t, ast.Name) and t.id == name for t in n.targets)
++                    and any(isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name)
++                            and t.value.id == 'msg' for t in ast.walk(n.value)))
++        execute([node], env, 'TrackerNode.feedback')
++    return env['gimbal_yaw'], env['gimbal_pitch']
++
++
++def send_visual_target(yaw, pitch):
++    # 保留视觉自己的 int16 编码、ROS 字段和取反操作，不在测试中改写其协议。
++    encoded = controller_cls().encode_angle_for_mcu(yaw, pitch)
++    messages = []
++    tracker = tracker_cls()
++    tracker.pub_mpc_control = SimpleNamespace(publish=messages.append)
++    tracker.publish_mpc_speed(*encoded, fire=False)
++    frames, logs = [], []
++    sender = sender_cls()
++    sender.can_id = 5
++    sender.sock = SimpleNamespace(send=frames.append)
++    sender.get_logger = lambda: SimpleNamespace(info=logs.append, error=logs.append)
++    sender.control_callback(messages[0])
++    assert len(frames) == 1, logs
++    can_id, dlc, payload = struct.unpack('=IB3x8s', frames[0])
++    assert can_id == 5 and dlc == 8
++    return payload, logs
++
++
++cases = []
++
++
++def add(name, visual_target, expected, feedback=(0, 0), speed=(0, 0)):
++    payload, logs = send_visual_target(*visual_target)
++    raw = struct.unpack('<BhhBh', payload)
++    cases.append(dict(name=name, visual_target=visual_target, expected=expected,
++                      feedback=feedback, speed=speed, raw_yaw=raw[1], raw_pitch=raw[2],
++                      payload_hex=payload.hex(' '), actual_vision_log=logs))
++
++
++for yaw in (3.0, -3.0, 0.03, -0.03, 0.0):
++    add(f'yaw {yaw:+g}', (yaw, 0), (yaw, 0))
++for pitch in (0.2, -0.2, 0.6, -0.4):
++    add(f'INS pitch {pitch:+g}', (0, -pitch), (0, pitch))
++for pose in ((0.5, 0.2), (-0.5, -0.2), (3.1, 0.6), (-3.1, -0.4)):
++    visual = feedback_to_visual(*pose)
++    rotation, translation = ns['compute_cam_to_chassis_transform'](*visual)
++    point_on_axis = rotation @ np.array([0.0, 0.0, 5.0]) + translation
++    target = selector_cls().compute_gimbal_aim_fast(point_on_axis, *visual)
++    add(f'optical-axis hold {pose}', target, pose, pose)
++for target, current in ((-176, 179), (176, -179)):
++    add(f'valid yaw target across pi {current} -> {target}', (math.radians(target), 0),
++        (math.radians(target), 0), (math.radians(current), 0))
++for pitch, limited in ((1.0, 0.7), (-1.0, -0.45)):
++    add(f'board pitch limit {pitch:+g}', (0, -pitch), (0, limited))
++for speed in ((0.5, -0.5), (-0.5, 0.5)):
++    add(f'inner loop feedback {speed}', (0.03, -0.02), (0.03, 0.02), speed=speed)
++
++# 复用电控既有测试的源码提取和 HAL 桩，停止在其 main 测试之前。
++helper = BOARD / 'tools/check_vision_control.py'
++env = {'__file__': str(helper), '__name__': 'adapter_source'}
++found = False
++for node in ast.parse(read(helper)).body:
++    if isinstance(node, ast.AugAssign) and isinstance(node.value, ast.Constant) and 'int main(void)' in str(node.value.value):
++        found = True
++        break
++    execute([node], env, str(helper))
++assert found
++source = env['source']
++gimbal = read(BOARD / 'Task/gimbal_task.c')
++for relative in ('Task/NX_communicate.c', 'Task/NX_communicate.h', 'Applications/CAN_recieve_send.c', 'Control/pid.c'):
++    read(BOARD / relative)
++for line in gimbal.splitlines():
++    if re.match(r'#define (PITCH|YAW)_(SPD_K|AGL_K|VOLT_MAX_|AGL_SPD_MAX_)', line):
++        source += line + '\n'
++source += r'''
++static void check_case(int n, const uint8_t bytes[8], float yaw, float pitch, float yaw_speed, float pitch_speed) {
++    memset(&YawCtrl, 0, sizeof(YawCtrl)); memset(&PitchCtrl, 0, sizeof(PitchCtrl));
++    NX_data = (CAN_Send_to_MCU){0}; vision_debug = (VisionDebug_t){0}; data_ready = 0;
++    current_mode = lastMode = RobotState_e_CommonCar; auto_mode = 1;
++    YawCtrl.nowAbsoluteAngle = yaw; PitchCtrl.nowAbsoluteAngle = pitch;
++    YawCtrl.radspeed = yaw_speed; PitchCtrl.radspeed = pitch_speed;
++    YawCtrl.want_AbsoluteAngleCtrl = 0.6f; PitchCtrl.want_AbsoluteAngleCtrl = -0.1f;
++'''
++for axis, prefix in (('Yaw', 'YAW'), ('Pitch', 'PITCH')):
++    for loop, coeff, limit in (('agl', 'AGL', 'AGL_SPD'), ('spd', 'SPD', 'VOLT')):
++        for field, macro in [('Kp', f'{coeff}_KP'), ('Ki', f'{coeff}_KI'), ('Kd', f'{coeff}_KD'),
++                             ('max_out', f'{limit}_MAX_OUT'), ('max_iout', f'{limit}_MAX_IOUT')]:
++            source += f'    {axis}Ctrl.{loop}_pid.{field} = {prefix}_{macro};\n'
++        source += f'    {axis}Ctrl.{loop}_pid.mode = PID_POSITION;\n'
++source += r'''
++    receive(bytes); getControlAngles(); unitPID_calc();
++    float target_y = YawCtrl.want_AbsoluteAngleCtrl, target_p = PitchCtrl.want_AbsoluteAngleCtrl;
++    for (int i = 0; i < 100; ++i) { getControlAngles(); unitPID_calc(); }
++    assert(vision_debug.applied_count == 1);
++    assert(YawCtrl.want_AbsoluteAngleCtrl == target_y && PitchCtrl.want_AbsoluteAngleCtrl == target_p);
++    for (int i = 0; i < 100; ++i) { receive(bytes); getControlAngles(); unitPID_calc(); }
++    assert(vision_debug.applied_count == 101);
++    assert(YawCtrl.want_AbsoluteAngleCtrl == target_y && PitchCtrl.want_AbsoluteAngleCtrl == target_p);
++    assert(fabsf(YawCtrl.spd_pid.set - YawCtrl.agl_pid.out) < 1e-6f);
++    assert(fabsf(PitchCtrl.spd_pid.set - PitchCtrl.agl_pid.out) < 1e-6f);
++    assert(fabsf(YawCtrl.spd_pid.fdb - yaw_speed) < 1e-6f);
++    assert(fabsf(PitchCtrl.spd_pid.fdb - pitch_speed) < 1e-6f);
++    assert(YawCtrl.Volt_out == (int16_t)YawCtrl.spd_pid.out);
++    assert(PitchCtrl.Volt_out == (int16_t)-PitchCtrl.spd_pid.out);
++    printf("%d %.9f %.9f %.9f %.9f %d %d\n", n, target_y, target_p,
++           YawCtrl.agl_pid.error[0], PitchCtrl.agl_pid.error[0], YawCtrl.Volt_out, PitchCtrl.Volt_out);
++}
++int main(void) {
++'''
++for i, case in enumerate(cases):
++    data = ','.join('0x' + b for b in case['payload_hex'].split())
++    values = ','.join(f'{v:.12f}f' for v in (*case['feedback'], *case['speed']))
++    source += f'check_case({i}, (uint8_t[8]){{{data}}}, {values});\n'
++source += 'return 0;\n}\n'
++c_file, exe = OUT / 'check.c', OUT / 'check.exe'
++c_file.write_text(source, encoding='utf-8')
++subprocess.run([args.gcc, '-std=c99', '-O2', '-I', str(BOARD / 'Applications'),
++                '-I', str(BOARD / 'Task'), '-I', str(BOARD / 'Control'), str(c_file),
++                '-o', str(exe), '-lm'], check=True)
++output = subprocess.check_output([str(exe)], text=True)
++assert len(output.splitlines()) == len(cases)
++failed = 0
++for line in output.splitlines():
++    i, yaw, pitch, err_y, err_p, motor_y, motor_p = line.split()
++    case = cases[int(i)]
++    targets = float(yaw), float(pitch)
++    errors = float(err_y), float(err_p)
++    ok = all(abs(actual - expected) < 1e-4 for actual, expected in zip(targets, case['expected']))
++    ok &= all(abs(actual - math.remainder(expected - fb, 2 * math.pi)) < 1e-4
++              for actual, expected, fb in zip(errors, case['expected'], case['feedback']))
++    case['mcu'] = dict(target=targets, error=errors, simulated_motor_output=(int(motor_y), int(motor_p)), passed=ok)
++    failed += int(not ok)
++    print(f'{"PASS" if ok else "FAIL"} {case["name"]}: target=({yaw}, {pitch})')
++assert all(hashlib.sha256(Path(p).read_bytes()).hexdigest() == digest for p, digest in hashes.items())
++report = dict(scope='Original vision source read only; actual encode/send and MCU dual PID functions with mocked feedback/socket.',
++              vision_root=str(VISION), cases=cases, failed=failed, source_sha256=hashes,
++              note='No hardware response or ROS runtime validation; repeated frames and hold cycles each tested 100 times.')
++(OUT / args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
++print(f'{len(cases) - failed}/{len(cases)} passed; vision source unchanged; report: {OUT / args.report}')
++raise SystemExit(1 if failed else 0)
+--- /dev/null
++++ b/docs/VISION_ABSOLUTE_ADAPTER.md
+@@ -0,0 +1,90 @@
++# 下位机适配现有视觉绝对角协议
++
++本次只修改 `BubinGimbal`。视觉工程是只读参考，使用其现有
++`start.sh -> TrackerNode.py -> mpc_can_sender.py` 主链路，不更改视觉协议或发送代码。
++此前同时修改两端的方案已撤回，不作为本次验证依据。
++
++## 板端控制链
++
++```text
++CAN 新帧 -> 原子复制完整报文 -> 解码绝对角 -> 替换角度环目标
++        -> 角度 PID（目标角与 INS 反馈）-> 目标角速度
++        -> 速度 PID（目标角速度与本机速度反馈）-> 电机指令
++```
++
++同一目标重复发送不会累加；没有新帧时保持上次目标；零角度也是有效目标。
++Yaw 位置误差继续按最短角度环绕，Pitch 继续使用现有机械限位。
++角度与速度环参数、电机输出方向、控制周期、遥控器门控均沿用现有实现。
++
++## 现有视觉的线协议
++
++标准 CAN 数据帧 `0x005`，DLC 为 8，小端结构 `<BhhBh>`：
++
++| 字节 | 字段 | 解释 |
++| --- | --- | --- |
++| 0 | mode | 视觉主链路不开火发 1，开火发 2 |
++| 1–2 | yaw | 有符号 int16 绝对角，`raw_yaw * PI / 32767` rad |
++| 3–4 | pitch | 有符号 int16 绝对角，`raw_pitch * PI / 32767` rad |
++| 5 | fire | 开火字段，沿用既有处理 |
++| 6–7 | rev | 保留字段 |
++
++这里的 Yaw/Pitch 是 **CAN 载荷解码后的角度**，已经与板端 INS 同向。
++不要把视觉内部坐标的正负号再施加到这两个字段上。
++
++### 为什么移除板端 Pitch 取反
++
++只读核对的源代码依据：
++
++1. 板端 `NX_communicate.c` 按 `[qw,qx,qy,qz]` 回传四元数；
++   视觉 `hik_camera/src/hik_camera_sdk.cpp` 的 Yaw/Pitch 公式与板端
++   `components/algorithm/QuaternionEKF.c` 对应，Detector 换算为弧度发布。
++2. `TrackerNode.py` 使用 `gimbal_yaw = msg.gimbal_yaw`、
++   `gimbal_pitch = -msg.gimbal_pitch`，解算目标处在该视觉坐标系中。
++3. `gimbal_controller.py` 将绝对弧度量化为 `round(angle / PI * 32767)`。
++4. 当前 `config.py` 两个 `CAN_*_SIGN` 都是 `-1`；
++   `mpc_can_sender.py` 又在打包时对 Yaw 取负，因此 Yaw 的两次反转抵消；
++   Pitch 只在发送时取负一次，正好从视觉坐标转换回 INS 方向。
++5. 因此板端应当对两轴都直接解码。之前 Pitch 前面的负号导致再次反转。
++
++例：INS Pitch 为 `+0.2 rad` 且目标位于光轴中心，Tracker 得到 `-0.2 rad`，
++发送端打包为约 `+2086`，板端应保持 `+0.199999 rad`。
++旧板端解码会错误地变成 `-0.199999 rad`。
++
++本次控制行为改动仅在 `Task/gimbal_task.c` 的 Pitch 解码处移除负号。
++Yaw 已是新帧直接赋绝对目标；Pitch 电机输出端现有负号属于电机驱动方向，不改动。
++
++## 验证
++
++`tools/check_vision_absolute_adapter.py` 只读取视觉源文件，通过 AST 提取实际编码、
++ROS 消息发布及 CAN 发送函数，用内存 socket 取得实际报文；随后编译运行板端实际
++接收、原子取帧、目标更新、双环 PID 函数及现有增益。未导入或写入视觉工程文件。
++
++- 修改前 19 组用例有 12 组失败，集中在 Pitch 符号、姿态保持及其机械限位。
++- 修改后 19/19 通过：Yaw 正负目标、零目标、Pitch 正负目标、中心姿态保持、
++  有效绝对目标跨 ±π、机械限位以及非零速度反馈。
++- 每组检查 100 个无新帧周期、100 次重复目标，确认没有额外累加。
++- 两轴速度环目标等于位置环输出，并使用相应速度反馈；电机输出仍来自原速度环。
++- 原有收帧竞态、门控和蓝牙遥测测试通过；Debug/Release 编译通过。
++
++运行（需要 numpy 和主机 GCC）：
++
++```powershell
++rtk proxy python tools/check_vision_absolute_adapter.py --vision "D:\STM32 Related\资源库\BUPT-Auto_aim_2026-main_v2\BUPT-Auto_aim_2026-main_v2" --gcc "C:\c-dev\w64devkit\bin\gcc.exe"
++```
++
++这是源码函数和构建验证，尚未烧录或验证真实电机响应。实际转向仍需与接收原始值、
++目标角、INS 反馈、误差一起核对；本次不能认定原有 Yaw 异常或小陀螺漂移已经实车解决。
++
++## 板端无法从报文反推的信息
++
++当前主链路传的是编码整数，不是裸 float。若直接把 `3` 填进现有 ROS 话题字段，
++发送器可能只发出原始整数 3，板端按协议只能得到约 `0.000288 rad`；不能猜成 3 rad。
++当前视觉内部若已经将超量程 Yaw 截断到 ±π，原来的目标信息也无法在板端恢复。
++旧手动脚本中的 6 字节报文与主链路不同，本次继续按 8 字节主协议校验，不根据长度猜坐标系。
++这些差异只记录供两组对照，本次没有修改视觉文件或在下位机增加猜测规则。
++
++## 本地存档
++
++`archives/absolute_adapter/20261017_021539/` 保存本次板端修改前后文件、独立补丁、
++前后测试结果、当前 Debug/Release 固件和哈希。视觉文件只记录哈希，不创建更新包。
++与 `archives/interface/` 下已撤回的双端方案区分；本次未推送或烧录。

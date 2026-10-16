@@ -1,0 +1,782 @@
+{
+  "scope": "Original vision source read only; actual encode/send and MCU dual PID functions with mocked feedback/socket.",
+  "vision_root": "D:\\STM32 Related\\资源库\\BUPT-Auto_aim_2026-main_v2\\BUPT-Auto_aim_2026-main_v2",
+  "cases": [
+    {
+      "name": "yaw +3",
+      "visual_target": [
+        3.0,
+        0
+      ],
+      "expected": [
+        3.0,
+        0
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 31290,
+      "raw_pitch": 0,
+      "payload_hex": "01 3a 7a 00 00 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=-2.99998 rad (-31290), Pitch=+0.00000 rad (0), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          2.999982595,
+          0.0
+        ],
+        "error": [
+          2.999982595,
+          0.0
+        ],
+        "simulated_motor_output": [
+          30000,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "yaw -3",
+      "visual_target": [
+        -3.0,
+        0
+      ],
+      "expected": [
+        -3.0,
+        0
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": -31290,
+      "raw_pitch": 0,
+      "payload_hex": "01 c6 85 00 00 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+2.99998 rad (31290), Pitch=+0.00000 rad (0), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          -2.999982595,
+          0.0
+        ],
+        "error": [
+          -2.999982595,
+          0.0
+        ],
+        "simulated_motor_output": [
+          -30000,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "yaw +0.03",
+      "visual_target": [
+        0.03,
+        0
+      ],
+      "expected": [
+        0.03,
+        0
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 313,
+      "raw_pitch": 0,
+      "payload_hex": "01 39 01 00 00 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=-0.03001 rad (-313), Pitch=+0.00000 rad (0), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.030009415,
+          0.0
+        ],
+        "error": [
+          0.030009415,
+          0.0
+        ],
+        "simulated_motor_output": [
+          1800,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "yaw -0.03",
+      "visual_target": [
+        -0.03,
+        0
+      ],
+      "expected": [
+        -0.03,
+        0
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": -313,
+      "raw_pitch": 0,
+      "payload_hex": "01 c7 fe 00 00 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+0.03001 rad (313), Pitch=+0.00000 rad (0), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          -0.030009415,
+          0.0
+        ],
+        "error": [
+          -0.030009415,
+          0.0
+        ],
+        "simulated_motor_output": [
+          -1800,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "yaw +0",
+      "visual_target": [
+        0.0,
+        0
+      ],
+      "expected": [
+        0.0,
+        0
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 0,
+      "raw_pitch": 0,
+      "payload_hex": "01 00 00 00 00 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+0.00000 rad (0), Pitch=+0.00000 rad (0), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.0,
+          0.0
+        ],
+        "error": [
+          0.0,
+          0.0
+        ],
+        "simulated_motor_output": [
+          0,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "INS pitch +0.2",
+      "visual_target": [
+        0,
+        -0.2
+      ],
+      "expected": [
+        0,
+        0.2
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 0,
+      "raw_pitch": 2086,
+      "payload_hex": "01 00 00 26 08 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+0.00000 rad (0), Pitch=+0.20000 rad (2086), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.0,
+          0.199998841
+        ],
+        "error": [
+          0.0,
+          0.199998841
+        ],
+        "simulated_motor_output": [
+          0,
+          -11999
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "INS pitch -0.2",
+      "visual_target": [
+        0,
+        0.2
+      ],
+      "expected": [
+        0,
+        -0.2
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 0,
+      "raw_pitch": -2086,
+      "payload_hex": "01 00 00 da f7 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+0.00000 rad (0), Pitch=-0.20000 rad (-2086), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.0,
+          -0.199998841
+        ],
+        "error": [
+          0.0,
+          -0.199998841
+        ],
+        "simulated_motor_output": [
+          0,
+          11999
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "INS pitch +0.6",
+      "visual_target": [
+        0,
+        -0.6
+      ],
+      "expected": [
+        0,
+        0.6
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 0,
+      "raw_pitch": 6258,
+      "payload_hex": "01 00 00 72 18 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+0.00000 rad (0), Pitch=+0.60000 rad (6258), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.0,
+          0.599996507
+        ],
+        "error": [
+          0.0,
+          0.599996507
+        ],
+        "simulated_motor_output": [
+          0,
+          -30000
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "INS pitch -0.4",
+      "visual_target": [
+        0,
+        0.4
+      ],
+      "expected": [
+        0,
+        -0.4
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 0,
+      "raw_pitch": -4172,
+      "payload_hex": "01 00 00 b4 ef 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+0.00000 rad (0), Pitch=-0.40000 rad (-4172), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.0,
+          -0.399997681
+        ],
+        "error": [
+          0.0,
+          -0.399997681
+        ],
+        "simulated_motor_output": [
+          0,
+          23999
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "optical-axis hold (0.5, 0.2)",
+      "visual_target": [
+        0.4999999999999999,
+        -0.2
+      ],
+      "expected": [
+        0.5,
+        0.2
+      ],
+      "feedback": [
+        0.5,
+        0.2
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 5215,
+      "raw_pitch": 2086,
+      "payload_hex": "01 5f 14 26 08 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=-0.50000 rad (-5215), Pitch=+0.20000 rad (2086), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.499997109,
+          0.199998841
+        ],
+        "error": [
+          -2.891e-06,
+          -1.162e-06
+        ],
+        "simulated_motor_output": [
+          0,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "optical-axis hold (-0.5, -0.2)",
+      "visual_target": [
+        -0.4999999999999999,
+        0.2
+      ],
+      "expected": [
+        -0.5,
+        -0.2
+      ],
+      "feedback": [
+        -0.5,
+        -0.2
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": -5215,
+      "raw_pitch": -2086,
+      "payload_hex": "01 a1 eb da f7 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+0.50000 rad (5215), Pitch=-0.20000 rad (-2086), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          -0.499997109,
+          -0.199998841
+        ],
+        "error": [
+          2.891e-06,
+          1.162e-06
+        ],
+        "simulated_motor_output": [
+          0,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "optical-axis hold (3.1, 0.6)",
+      "visual_target": [
+        3.1,
+        -0.6
+      ],
+      "expected": [
+        3.1,
+        0.6
+      ],
+      "feedback": [
+        3.1,
+        0.6
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 32333,
+      "raw_pitch": 6258,
+      "payload_hex": "01 4d 7e 72 18 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=-3.09998 rad (-32333), Pitch=+0.60000 rad (6258), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          3.099982023,
+          0.599996507
+        ],
+        "error": [
+          -1.7881e-05,
+          -3.517e-06
+        ],
+        "simulated_motor_output": [
+          0,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "optical-axis hold (-3.1, -0.4)",
+      "visual_target": [
+        -3.1,
+        0.4
+      ],
+      "expected": [
+        -3.1,
+        -0.4
+      ],
+      "feedback": [
+        -3.1,
+        -0.4
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": -32333,
+      "raw_pitch": -4172,
+      "payload_hex": "01 b3 81 b4 ef 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+3.09998 rad (32333), Pitch=-0.40000 rad (-4172), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          -3.099982023,
+          -0.399997681
+        ],
+        "error": [
+          1.7881e-05,
+          2.325e-06
+        ],
+        "simulated_motor_output": [
+          0,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "valid yaw target across pi 179 -> -176",
+      "visual_target": [
+        -3.07177948351002,
+        0
+      ],
+      "expected": [
+        -3.07177948351002,
+        0
+      ],
+      "feedback": [
+        3.12413936106985,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": -32039,
+      "raw_pitch": 0,
+      "payload_hex": "01 d9 82 00 00 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+3.07179 rad (32039), Pitch=+0.00000 rad (0), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          -3.071794271,
+          0.0
+        ],
+        "error": [
+          0.08725214,
+          0.0
+        ],
+        "simulated_motor_output": [
+          5235,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "valid yaw target across pi -179 -> 176",
+      "visual_target": [
+        3.07177948351002,
+        0
+      ],
+      "expected": [
+        3.07177948351002,
+        0
+      ],
+      "feedback": [
+        -3.12413936106985,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 32039,
+      "raw_pitch": 0,
+      "payload_hex": "01 27 7d 00 00 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=-3.07179 rad (-32039), Pitch=+0.00000 rad (0), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          3.071794271,
+          0.0
+        ],
+        "error": [
+          -0.08725214,
+          0.0
+        ],
+        "simulated_motor_output": [
+          -5235,
+          0
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "board pitch limit +1",
+      "visual_target": [
+        0,
+        -1.0
+      ],
+      "expected": [
+        0,
+        0.7
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 0,
+      "raw_pitch": 10430,
+      "payload_hex": "01 00 00 be 28 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+0.00000 rad (0), Pitch=+0.99999 rad (10430), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.0,
+          0.699999988
+        ],
+        "error": [
+          0.0,
+          0.699999988
+        ],
+        "simulated_motor_output": [
+          0,
+          -30000
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "board pitch limit -1",
+      "visual_target": [
+        0,
+        1.0
+      ],
+      "expected": [
+        0,
+        -0.45
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0,
+        0
+      ],
+      "raw_yaw": 0,
+      "raw_pitch": -10430,
+      "payload_hex": "01 00 00 42 d7 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=+0.00000 rad (0), Pitch=-0.99999 rad (-10430), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.0,
+          -0.449999988
+        ],
+        "error": [
+          0.0,
+          -0.449999988
+        ],
+        "simulated_motor_output": [
+          0,
+          26999
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "inner loop feedback (0.5, -0.5)",
+      "visual_target": [
+        0.03,
+        -0.02
+      ],
+      "expected": [
+        0.03,
+        0.02
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        0.5,
+        -0.5
+      ],
+      "raw_yaw": 313,
+      "raw_pitch": 209,
+      "payload_hex": "01 39 01 d1 00 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=-0.03001 rad (-313), Pitch=+0.02004 rad (209), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.030009415,
+          0.020038234
+        ],
+        "error": [
+          0.030009415,
+          0.020038234
+        ],
+        "simulated_motor_output": [
+          -30000,
+          -30000
+        ],
+        "passed": true
+      }
+    },
+    {
+      "name": "inner loop feedback (-0.5, 0.5)",
+      "visual_target": [
+        0.03,
+        -0.02
+      ],
+      "expected": [
+        0.03,
+        0.02
+      ],
+      "feedback": [
+        0,
+        0
+      ],
+      "speed": [
+        -0.5,
+        0.5
+      ],
+      "raw_yaw": 313,
+      "raw_pitch": 209,
+      "payload_hex": "01 39 01 d1 00 00 00 00",
+      "actual_vision_log": [
+        "Send: mode=1, Yaw=-0.03001 rad (-313), Pitch=+0.02004 rad (209), Fire=0"
+      ],
+      "mcu": {
+        "target": [
+          0.030009415,
+          0.020038234
+        ],
+        "error": [
+          0.030009415,
+          0.020038234
+        ],
+        "simulated_motor_output": [
+          30000,
+          30000
+        ],
+        "passed": true
+      }
+    }
+  ],
+  "failed": 0,
+  "source_sha256": {
+    "D:\\STM32 Related\\资源库\\BUPT-Auto_aim_2026-main_v2\\BUPT-Auto_aim_2026-main_v2\\tasks\\config\\config.py": "d249d0ae3f35cc07503bc3d6fa57eba14aaecfae7ec85f4df06c034b09b0c6d0",
+    "D:\\STM32 Related\\资源库\\BUPT-Auto_aim_2026-main_v2\\BUPT-Auto_aim_2026-main_v2\\tasks\\mpc\\mpc_can_sender.py": "2fe1b2f56cfbfc5ab7ff278c29c7d71d1f0c4c0b0ec8247f7fe38cd16c3f9bbc",
+    "D:\\STM32 Related\\资源库\\BUPT-Auto_aim_2026-main_v2\\BUPT-Auto_aim_2026-main_v2\\tasks\\tracker\\gimbal_controller.py": "148409098436146a1b0a3d9c91b5f4d6ca8ba63e232c294d0291f2ab66fa94f0",
+    "D:\\STM32 Related\\资源库\\BUPT-Auto_aim_2026-main_v2\\BUPT-Auto_aim_2026-main_v2\\tasks\\tracker\\TrackerNode.py": "cb0254c754a8fd1c1ec075d9792602c0504350984d08ec2e2f0e2086302e4734",
+    "D:\\STM32 Related\\资源库\\BUPT-Auto_aim_2026-main_v2\\BUPT-Auto_aim_2026-main_v2\\tasks\\tracker\\armor_selector.py": "73c0ea2bee83405bb5b589b45f1aef32201320f46393d4a6b189cb76e8a0a518",
+    "D:\\STM32 Related\\资源库\\BUPT-Auto_aim_2026-main_v2\\BUPT-Auto_aim_2026-main_v2\\tasks\\tracker\\transform_utils.py": "5e637cdf8c1c3b7ddde1e17ddd2205ce6157997a3f76cfa1eeb21dd005341ea8",
+    "D:\\STM32 Related\\资源库\\BubinGimbal\\tools\\check_vision_control.py": "6871c919e68a87bbd5cfe67bb04108cc6c2bc5502ae1c251cefd8b19a2e3ff52",
+    "D:\\STM32 Related\\资源库\\BubinGimbal\\Task\\gimbal_task.c": "00be2e070851a21e746092661c539d259c1140765d83d88ecdf273863007ecad",
+    "D:\\STM32 Related\\资源库\\BubinGimbal\\Task\\NX_communicate.c": "e943b317ff00bfc650e92d208f95b9a4192211dc2b3bd050c54c95a812339e2d",
+    "D:\\STM32 Related\\资源库\\BubinGimbal\\Task\\NX_communicate.h": "3c82b233d7495a748eb776fc958393c1d24c187800df5ac24cf16e82c4323a89",
+    "D:\\STM32 Related\\资源库\\BubinGimbal\\Applications\\CAN_recieve_send.c": "4b7febf75c065e11615cc126db59df9dd8db9df88b217b674bbcb86ed625448d",
+    "D:\\STM32 Related\\资源库\\BubinGimbal\\Control\\pid.c": "53bc870388dddec1987968300634ae45b6e50171328000d7424bff46e1909de6"
+  },
+  "note": "No hardware response or ROS runtime validation; repeated frames and hold cycles each tested 100 times."
+}
