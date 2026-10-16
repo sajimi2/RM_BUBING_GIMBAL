@@ -24,3 +24,7 @@ JLinkLog.txt
 .vscode/
 *.suo
 *.user
+
+# CMake/Ninja 输出及个人工具路径
+/build/
+/CMakeUserPresets.json

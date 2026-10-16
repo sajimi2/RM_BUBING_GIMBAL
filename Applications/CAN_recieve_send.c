@@ -6,18 +6,20 @@
 #include "INS_task.h"	
 #include "remote_control.h"
 #include "gimbal_task.h"
-//#include "nucCommu.h"
 #include "user_lib.h"
 #include "pid.h"
 #include "Robot_Information.h"
+#include "NX_communicate.h"
 #include <string.h>
 
 extern CAN_HandleTypeDef hcan1;
 extern CAN_HandleTypeDef hcan2;
-extern volatile uint8_t  rc_online;     // Ò£¿ØÆ÷ÔÚÏß×´Ì¬£º0-ÀëÏß£¬1-ÔÚÏß
+extern volatile uint8_t  rc_online;     // é¥æ§å™¨åœ¨çº¿çŠ¶æ€ï¼š0-ç¦»çº¿ï¼Œ1-åœ¨çº¿
+extern volatile uint8_t data_ready;
+extern uint8_t fire_t;
 
-//ÓÃÓÚ´æ·ÅËùÓĞĞÅÏ¢¡£Ìá¹©º¯Êı½Ó¿Ú¹©Íâ½çÊ¹ÓÃ
-static motor_measure_t motor_chassis[7];//ËÄ¸öµ×ÅÌ3508£¬Ò»¸ö²¦µ¯£¬Ò»¸öyaw£¬Ò»¸öpitch
+//ç”¨äºå­˜æ”¾æ‰€æœ‰ä¿¡æ¯ã€‚æä¾›å‡½æ•°æ¥å£ä¾›å¤–ç•Œä½¿ç”¨
+static motor_measure_t motor_chassis[7];//å››ä¸ªåº•ç›˜3508ï¼Œä¸€ä¸ªæ‹¨å¼¹ï¼Œä¸€ä¸ªyawï¼Œä¸€ä¸ªpitch
 static motor_measure_t motor_shoot[2];
 
 static CAN_TxHeaderTypeDef  gimbal_tx_message;
@@ -26,12 +28,14 @@ static uint8_t              gimbal_can_send_data[8];
 static CAN_TxHeaderTypeDef  shoot_tx_message;
 static uint8_t              shoot_can_send_data[8];
 
+extern CAN_Send_to_MCU NX_data;
+
 /**
-  * @brief          hal¿âCAN»Øµ÷º¯Êı,½ÓÊÕµç»úÊı¾İ
-  * @param[in]      hcan:CAN¾ä±úÖ¸Õë
+  * @brief          halåº“CANå›è°ƒå‡½æ•°,æ¥æ”¶ç”µæœºæ•°æ®
+  * @param[in]      hcan:CANå¥æŸ„æŒ‡é’ˆ
   * @retval         none
   */
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//ÊÕÈ¡»Øµ÷£¬ÀíÂÛÉÏÔÆÌ¨c°å²»»á¹Üµ×ÅÌµç»úµÄÊı¾İµÄ£¬Ó¦¸ÃÊÕ²¦µ¯ºÍyawµÄÊı¾İ
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//æ”¶å–å›è°ƒï¼Œç†è®ºä¸Šäº‘å°cæ¿ä¸ä¼šç®¡åº•ç›˜ç”µæœºçš„æ•°æ®çš„ï¼Œåº”è¯¥æ”¶æ‹¨å¼¹å’Œyawçš„æ•°æ®
 {
     CAN_RxHeaderTypeDef rx_header;
     uint8_t rx_data[8];
@@ -52,13 +56,13 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//ÊÕÈ¡»Øµ÷£¬ÀíÂÛÉ
 			i = rx_header.StdId - CAN_3508_M1_ID;
 			if((hcan==&SHOOT_CAN)&&(i==0||i==1))
 			{
-				get_motor_measure(&motor_shoot[i],rx_data);//Ä¦²ÁÂÖ×´Ì¬
+				get_motor_measure(&motor_shoot[i],rx_data);//æ‘©æ“¦è½®çŠ¶æ€
 				break;
 			}		
-			get_motor_measure(&motor_chassis[i], rx_data);//Ò»¸ö²¦µ¯£¬Ò»¸öyaw£¬Ò»¸öpitch
+			get_motor_measure(&motor_chassis[i], rx_data);//ä¸€ä¸ªæ‹¨å¼¹ï¼Œä¸€ä¸ªyawï¼Œä¸€ä¸ªpitch
 			break;
 		}
-		case 0x004://²ÃÅĞÏµÍ³·¢µÄ¶«Î÷£¬ÏÈ²»¹Ü
+		case 0x004://è£åˆ¤ç³»ç»Ÿå‘çš„ä¸œè¥¿ï¼Œå…ˆä¸ç®¡
 		{
 //			typedef union
 //				{
@@ -71,9 +75,44 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//ÊÕÈ¡»Øµ÷£¬ÀíÂÛÉ
 //				}
 //				gimbal_rx_referee.shootspeed=data_0.data_s.shootspeed;
 //				gimbal_rx_referee.robot_id=data_0.data_s.robot_id;
-			//»ñÈ¡ÉäËÙ
+			//è·å–å°„é€Ÿ
 				break;
 		}
+		case 0x005:
+{
+    typedef union
+    {
+        CAN_Send_to_MCU NX_data;
+        uint8_t data[8];
+    } can_recieve_nx_data;
+
+    can_recieve_nx_data data_u;
+    memset(&data_u, 0, sizeof(data_u));
+
+    // æ‰‹åŠ¨æŒ‰å°ç«¯åºè§£æ yawï¼ˆç¬¬2ã€3å­—èŠ‚ï¼‰
+    data_u.NX_data.yaw = (int16_t)(
+        ((uint16_t)rx_data[1] << 0) |  // ä½8ä½
+        ((uint16_t)rx_data[2] << 8)    // é«˜8ä½
+    );
+
+    // æ‰‹åŠ¨æŒ‰å°ç«¯åºè§£æ pitchï¼ˆç¬¬4ã€5å­—èŠ‚ï¼‰
+    data_u.NX_data.pitch = (int16_t)(
+        ((uint16_t)rx_data[3] << 0) |  // ä½8ä½
+        ((uint16_t)rx_data[4] << 8)    // é«˜8ä½
+    );
+
+    // å…¶ä»–å­—èŠ‚æŒ‰éœ€æ‹·è´
+    data_u.data[0] = rx_data[0];
+    data_u.data[5] = rx_data[5];
+    data_u.data[6] = rx_data[6];
+    data_u.data[7] = rx_data[7];
+
+    NX_data = data_u.NX_data;
+    data_ready = 1;
+	
+	fire_t = NX_data.fire;
+    break;
+}
         default:
         {
             break;
@@ -81,11 +120,11 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//ÊÕÈ¡»Øµ÷£¬ÀíÂÛÉ
     }
 }
 /**
-  * @brief          ·¢ËÍÔÆÌ¨µç»ú¿ØÖÆµçÁ÷(0x205,0x206,0x207,0x208)
-  * @param[in]      yaw: (0x205) 6020µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-30000,30000]
-  * @param[in]      pitch: (0x206) 6020µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-30000,30000]
-  * @param[in]      shoot: (0x207) 2006µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-10000,10000]
-  * @param[in]      rev: (0x208) ±£Áô£¬µç»ú¿ØÖÆµçÁ÷
+  * @brief          å‘é€äº‘å°ç”µæœºæ§åˆ¶ç”µæµ(0x205,0x206,0x207,0x208)
+  * @param[in]      yaw: (0x205) 6020ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-30000,30000]
+  * @param[in]      pitch: (0x206) 6020ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-30000,30000]
+  * @param[in]      shoot: (0x207) 2006ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-10000,10000]
+  * @param[in]      rev: (0x208) ä¿ç•™ï¼Œç”µæœºæ§åˆ¶ç”µæµ
   * @retval         none
   */
 void CAN_cmd_gimbal(int16_t yaw, int16_t pitch, int16_t shoot, int16_t rev)
@@ -126,14 +165,14 @@ static const RC_ctrl_t *rc_chassis;
 
 static CAN_TxHeaderTypeDef  can1_tx_channel_message;
 
-//Õâ¸öÍ¨µÀ·¢ËÍµ×ÅÌ¿ØÖÆÁ¿
+//è¿™ä¸ªé€šé“å‘é€åº•ç›˜æ§åˆ¶é‡
 typedef struct
 {
 	int16_t channel_2;
 	int16_t channel_3;
 	uint8_t mode;
 	uint8_t onlineflag;
-	uint16_t key_v;    // ¼üÅÌ°´¼üÖµ
+	uint16_t key_v;    // é”®ç›˜æŒ‰é”®å€¼
 }can_send_encode_data_s;
 void CAN1_send_channel()
 {
@@ -147,7 +186,7 @@ void CAN1_send_channel()
     can_send_data_channel_u data_u;
     memset(&data_u, 0, sizeof(data_u));
     
-    // »ñÈ¡Ò£¿ØÊı¾İ
+    // è·å–é¥æ§æ•°æ®
     rc_chassis = get_remote_control_point();
 	
 	data_u.data.onlineflag= rc_online;
@@ -161,11 +200,11 @@ void CAN1_send_channel()
     can1_tx_channel_message.RTR = CAN_RTR_DATA;
     can1_tx_channel_message.DLC = 0x08;
     
-    // ·¢ËÍCANÊı¾İ
+    // å‘é€CANæ•°æ®
     HAL_CAN_AddTxMessage(&hcan1, &can1_tx_channel_message, data_u.data_1, &send_mail_box);
 }
 
-//Ä¦²ÁÂÖ¿ØÖÆ
+//æ‘©æ“¦è½®æ§åˆ¶
 void CAN_cmd_shoot(int16_t motor5, int16_t motor6)
 {
     uint32_t send_mail_box;
@@ -190,18 +229,18 @@ void CAN_cmd_shoot(int16_t motor5, int16_t motor6)
 //}
 
 /**
-  * @brief          ·µ»Øyaw 6020µç»úÊı¾İÖ¸Õë
+  * @brief          è¿”å›yaw 6020ç”µæœºæ•°æ®æŒ‡é’ˆ
   * @param[in]      none
-  * @retval         µç»úÊı¾İÖ¸Õë
+  * @retval         ç”µæœºæ•°æ®æŒ‡é’ˆ
   */
 const motor_measure_t *get_yaw_gimbal_motor_measure_point(void)
 {
     return &motor_chassis[4];
 }
 /**
-  * @brief          ·µ»Øpitch 6020µç»úÊı¾İÖ¸Õë
+  * @brief          è¿”å›pitch 6020ç”µæœºæ•°æ®æŒ‡é’ˆ
   * @param[in]      none
-  * @retval         µç»úÊı¾İÖ¸Õë
+  * @retval         ç”µæœºæ•°æ®æŒ‡é’ˆ
   */
 const motor_measure_t *get_pitch_gimbal_motor_measure_point(void)
 {
@@ -209,9 +248,9 @@ const motor_measure_t *get_pitch_gimbal_motor_measure_point(void)
 }
 
 /**
-  * @brief          ·µ»Ø²¦µ¯µç»ú 2006µç»úÊı¾İÖ¸Õë
+  * @brief          è¿”å›æ‹¨å¼¹ç”µæœº 2006ç”µæœºæ•°æ®æŒ‡é’ˆ
   * @param[in]      none
-  * @retval         µç»úÊı¾İÖ¸Õë
+  * @retval         ç”µæœºæ•°æ®æŒ‡é’ˆ
   */
 const motor_measure_t *get_trigger_motor_measure_point(void)
 {
@@ -219,9 +258,9 @@ const motor_measure_t *get_trigger_motor_measure_point(void)
 }
 
 /**
-  * @brief          ·µ»Øµ×ÅÌµç»ú 3508µç»úÊı¾İÖ¸Õë
-  * @param[in]      i: µç»ú±àºÅ,·¶Î§[0,3]
-  * @retval         µç»úÊı¾İÖ¸Õë
+  * @brief          è¿”å›åº•ç›˜ç”µæœº 3508ç”µæœºæ•°æ®æŒ‡é’ˆ
+  * @param[in]      i: ç”µæœºç¼–å·,èŒƒå›´[0,3]
+  * @retval         ç”µæœºæ•°æ®æŒ‡é’ˆ
   */
 const motor_measure_t *get_chassis_motor_measure_point(uint8_t i)
 {
@@ -229,9 +268,9 @@ const motor_measure_t *get_chassis_motor_measure_point(uint8_t i)
 }
 
 /**
-  * @brief          ·µ»ØÄ¦²ÁÂÖµç»ú 3508µç»úÊı¾İÖ¸Õë
-  * @param[in]      i: µç»ú±àºÅ,·¶Î§[0,1]
-  * @retval         µç»úÊı¾İÖ¸Õë
+  * @brief          è¿”å›æ‘©æ“¦è½®ç”µæœº 3508ç”µæœºæ•°æ®æŒ‡é’ˆ
+  * @param[in]      i: ç”µæœºç¼–å·,èŒƒå›´[0,1]
+  * @retval         ç”µæœºæ•°æ®æŒ‡é’ˆ
   */
 const motor_measure_t *get_shoot_motor_measure_point(uint8_t i)
 {

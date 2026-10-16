@@ -3,7 +3,7 @@
 #include "struct_typedef.h"
 #include "Robot_Information.h"
 
-//¶¨Òåµç»úĞÅÏ¢¶ÁÈ¡¡£Êµ¼ÊÊÇºê
+//å®šä¹‰ç”µæœºä¿¡æ¯è¯»å–ã€‚å®é™…æ˜¯å®
 #define get_motor_measure(ptr, data)                                    \
     {                                                                   \
         (ptr)->last_ecd = (ptr)->ecd;                                   \
@@ -13,86 +13,83 @@
         (ptr)->temperate = (data)[6];                                   \
     }
 /*
-µç»úÊı¾İ, 0:µ×ÅÌµç»ú1 3508µç»ú,  1:µ×ÅÌµç»ú2 3508µç»ú,2:µ×ÅÌµç»ú3 3508µç»ú,3:µ×ÅÌµç»ú4 3508µç»ú;
-4:yawÔÆÌ¨µç»ú 6020µç»ú; 5:pitchÔÆÌ¨µç»ú 6020µç»ú; 6:²¦µ¯µç»ú 2006µç»ú*/
-//6:²¦µ¯µç»ú 2006µç»ú ·¢Éú¸ü¸Ä
+ç”µæœºæ•°æ®, 0:åº•ç›˜ç”µæœº1 3508ç”µæœº,  1:åº•ç›˜ç”µæœº2 3508ç”µæœº,2:åº•ç›˜ç”µæœº3 3508ç”µæœº,3:åº•ç›˜ç”µæœº4 3508ç”µæœº;
+4:yawäº‘å°ç”µæœº 6020ç”µæœº; 5:pitchäº‘å°ç”µæœº 6020ç”µæœº; 6:æ‹¨å¼¹ç”µæœº 2006ç”µæœº*/
+//6:æ‹¨å¼¹ç”µæœº 2006ç”µæœº å‘ç”Ÿæ›´æ”¹
 /**
-  * @brief          ·¢ËÍµç»ú¿ØÖÆµçÁ÷(0x205,0x206,0x207,0x208)
-  * @param[in]      yaw: (0x205) 6020µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-30000,30000]
-  * @param[in]      pitch: (0x206) 6020µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-30000,30000]
-  * @param[in]      shoot: (0x207) 2006µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-10000,10000]
-  * @param[in]      rev: (0x208) ±£Áô£¬µç»ú¿ØÖÆµçÁ÷
+  * @brief          å‘é€ç”µæœºæ§åˆ¶ç”µæµ(0x205,0x206,0x207,0x208)
+  * @param[in]      yaw: (0x205) 6020ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-30000,30000]
+  * @param[in]      pitch: (0x206) 6020ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-30000,30000]
+  * @param[in]      shoot: (0x207) 2006ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-10000,10000]
+  * @param[in]      rev: (0x208) ä¿ç•™ï¼Œç”µæœºæ§åˆ¶ç”µæµ
   * @retval         none
   */
 extern void CAN_cmd_gimbal(int16_t yaw, int16_t pitch, int16_t shoot, int16_t rev);
 
 /**
-  * @brief          Ïòµ×ÅÌ·¢ËÍIDÎª0x700µÄCAN°ü,Ëü»áÉèÖÃ3508µç»ú½øÈë¿ìËÙÉèÖÃID
+  * @brief          å‘åº•ç›˜å‘é€IDä¸º0x700çš„CANåŒ…,å®ƒä¼šè®¾ç½®3508ç”µæœºè¿›å…¥å¿«é€Ÿè®¾ç½®ID
   * @param[in]      none
   * @retval         none
   */
 extern void CAN_cmd_chassis_reset_ID(void);
 
 /**
-  * @brief          ·¢ËÍµ×ÅÌµç»ú¿ØÖÆµçÁ÷(0x201,0x202,0x203,0x204)
-  * @param[in]      motor1: (0x201) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
-  * @param[in]      motor2: (0x202) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
-  * @param[in]      motor3: (0x203) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
-  * @param[in]      motor4: (0x204) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
+  * @brief          å‘é€åº•ç›˜ç”µæœºæ§åˆ¶ç”µæµ(0x201,0x202,0x203,0x204)
+  * @param[in]      motor1: (0x201) 3508ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-16384,16384]
+  * @param[in]      motor2: (0x202) 3508ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-16384,16384]
+  * @param[in]      motor3: (0x203) 3508ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-16384,16384]
+  * @param[in]      motor4: (0x204) 3508ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-16384,16384]
   * @retval         none
   */
 extern void CAN_cmd_chassis(int16_t motor1, int16_t motor2, int16_t motor3, int16_t motor4);
 
 /**
-  * @brief          ·¢ËÍ²¦µ¯µç»ú¿ØÖÆµçÁ÷(0x205,0x206)
-  * @param[in]      motor1: (0x205) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
-  * @param[in]      motor2: (0x206) 3508µç»ú¿ØÖÆµçÁ÷, ·¶Î§ [-16384,16384]
+  * @brief          å‘é€æ‹¨å¼¹ç”µæœºæ§åˆ¶ç”µæµ(0x205,0x206)
+  * @param[in]      motor1: (0x205) 3508ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-16384,16384]
+  * @param[in]      motor2: (0x206) 3508ç”µæœºæ§åˆ¶ç”µæµ, èŒƒå›´ [-16384,16384]
   * @retval         none
   */
 extern void CAN_cmd_shoot(int16_t motor5, int16_t motor6);
 
 
-// ÓÃÓÚ¸øÍâÃæµÄº¯ÊıÌá¹©Êı¾İ
+// ç”¨äºç»™å¤–é¢çš„å‡½æ•°æä¾›æ•°æ®
 
 /**
-  * @brief          ·µ»Øyaw 6020µç»úÊı¾İÖ¸Õë
+  * @brief          è¿”å›yaw 6020ç”µæœºæ•°æ®æŒ‡é’ˆ
   * @param[in]      none
-  * @retval         µç»úÊı¾İÖ¸Õë
+  * @retval         ç”µæœºæ•°æ®æŒ‡é’ˆ
   */
 extern const motor_measure_t *get_yaw_gimbal_motor_measure_point(void);
 
 /**
-  * @brief          ·µ»Øpitch 6020µç»úÊı¾İÖ¸Õë
+  * @brief          è¿”å›pitch 6020ç”µæœºæ•°æ®æŒ‡é’ˆ
   * @param[in]      none
-  * @retval         µç»úÊı¾İÖ¸Õë
+  * @retval         ç”µæœºæ•°æ®æŒ‡é’ˆ
   */
 extern const motor_measure_t *get_pitch_gimbal_motor_measure_point(void);
 
-//ÎÒÃÇ¿ÉÄÜĞèÒªĞŞ¸Ä²ÎÊı
+//æˆ‘ä»¬å¯èƒ½éœ€è¦ä¿®æ”¹å‚æ•°
 /**
-  * @brief          ·µ»Ø²¦µ¯µç»ú 2006µç»úÊı¾İÖ¸Õë
+  * @brief          è¿”å›æ‹¨å¼¹ç”µæœº 2006ç”µæœºæ•°æ®æŒ‡é’ˆ
   * @param[in]      none
-  * @retval         µç»úÊı¾İÖ¸Õë
+  * @retval         ç”µæœºæ•°æ®æŒ‡é’ˆ
   */
 extern const motor_measure_t *get_trigger_motor_measure_point(void);
 
 /**
-  * @brief          ·µ»Øµ×ÅÌµç»ú 3508µç»úÊı¾İÖ¸Õë
-  * @param[in]      i: µç»ú±àºÅ,·¶Î§[0,3]
-  * @retval         µç»úÊı¾İÖ¸Õë
+  * @brief          è¿”å›åº•ç›˜ç”µæœº 3508ç”µæœºæ•°æ®æŒ‡é’ˆ
+  * @param[in]      i: ç”µæœºç¼–å·,èŒƒå›´[0,3]
+  * @retval         ç”µæœºæ•°æ®æŒ‡é’ˆ
   */
 extern const motor_measure_t *get_chassis_motor_measure_point(uint8_t i);
 
 /**
-  * @brief          ·µ»ØÄ¦²ÁÂÖµç»ú 3508µç»úÊı¾İÖ¸Õë
-  * @param[in]      i: µç»ú±àºÅ,·¶Î§[0,2]
-  * @retval         µç»úÊı¾İÖ¸Õë
+  * @brief          è¿”å›æ‘©æ“¦è½®ç”µæœº 3508ç”µæœºæ•°æ®æŒ‡é’ˆ
+  * @param[in]      i: ç”µæœºç¼–å·,èŒƒå›´[0,2]
+  * @retval         ç”µæœºæ•°æ®æŒ‡é’ˆ
   */
 extern const motor_measure_t *get_shoot_motor_measure_point(uint8_t i);
 extern void CAN1_send_channel(void);
-//extern void CAN1_send_nuc_yaw(void);
-//extern const can_send_referee_s* get_refree_point(void);
-//extern void CAN1_send_keyboard(void);
 extern void CAN_cmd_gimbal(int16_t yaw, int16_t pitch, int16_t shoot, int16_t rev);
 extern void CAN_cmd_yaw(int16_t yaw);
 #endif

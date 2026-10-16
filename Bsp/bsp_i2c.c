@@ -143,7 +143,7 @@ void I2C2_tx_DMA_init(void)
 {
 
     //disable DMA
-    //ʧЧDMA
+    //失效DMA
     __HAL_DMA_DISABLE(hi2c2.hdmatx);
     
     while(hi2c2.hdmatx->Instance->CR & DMA_SxCR_EN)
@@ -161,7 +161,7 @@ void I2C2_tx_DMA_init(void)
 void I2C2_tx_DMA_enable(uint32_t tx_buf, uint16_t ndtr)
 {
     //disable DMA
-    //ʧЧDMA
+    //失效DMA
     __HAL_DMA_DISABLE(hi2c2.hdmatx);
 
     while(hi2c2.hdmatx->Instance->CR & DMA_SxCR_EN)

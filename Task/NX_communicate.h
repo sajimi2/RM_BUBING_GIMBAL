@@ -3,41 +3,35 @@
 
 #include "struct_typedef.h"
 
-// ÉÏÎ»»ú -> MCU
+// ä¸Šä½æœº -> MCU
 typedef struct __attribute__((packed))
 {
-    uint8_t head[2]; // 'S', 'P'
-    uint8_t mode;    // 0: ²»¿ØÖÆ, 1: ¿ØÖÆÔÆÌ¨µ«²»¿ª»ğ£¬2: ¿ØÖÆÔÆÌ¨ÇÒ¿ª»ğ
-    float yaw;
-    float yaw_vel;
-    float yaw_acc;
-    float pitch;
-    float pitch_vel;
-    float pitch_acc;
-    uint16_t crc16;
-} VisionToGimbal_t;
+    uint8_t mode;    // 0: ä¸æ§åˆ¶, 1: æ§åˆ¶äº‘å°ä½†ä¸å¼€ç«ï¼Œ2: æ§åˆ¶äº‘å°ä¸”å¼€ç«
+    int16_t yaw;
+    int16_t pitch;
+	uint8_t fire;
+	int16_t rev;
+} CAN_Send_to_MCU;
 
-// MCU -> ÉÏÎ»»ú
-typedef struct __attribute__((packed))
+// MCU -> ä¸Šä½æœº
+typedef struct
 {
-    uint8_t head[2]; // 'S', 'P'
-    uint8_t mode;    // 0: ¿ÕÏĞ, 1: ×ÔÃé, 2: Ğ¡·û, 3: ´ó·û
-    float q[4];      // wxyzË³Ğò
-    float yaw;
-    float yaw_vel;
-    float pitch;
-    float pitch_vel;
-    float bullet_speed;
-    uint16_t bullet_count; // ×Óµ¯ÀÛ¼Æ·¢ËÍ´ÎÊı
-    uint16_t crc16;
-} GimbalToVision_t;
+	int16_t qw;
+	int16_t qx;
+	int16_t qy;
+	int16_t qz;
+}Send_Quaternion;
 
-extern VisionToGimbal_t NX_data;
+typedef union
+{
+	Send_Quaternion u16_Quaternion;
+	uint8_t data[8];
+}CAN_send_to_NX;
+	
+extern CAN_Send_to_MCU NX_data;
 extern volatile uint8_t data_ready;
 
-// ³õÊ¼»¯º¯Êı
 void NXrecieve_Init(void);
-const VisionToGimbal_t* get_nx_control_point(void);
-void NX_task(void const *pvParameters);
-
+void Send_Gimbal_Information(void);
+const CAN_Send_to_MCU* get_nx_control_point(void);
 #endif

@@ -1,6 +1,6 @@
 /**
  * @file robot_total_mode.c
- * @brief ×î¶¥²ã×´Ì¬»ú£¬¾ö¶¨È«³µÄ£Ê½
+ * @brief æœ€é¡¶å±‚çŠ¶æ€æœºï¼Œå†³å®šå…¨è½¦æ¨¡å¼
  * @Auther Jing Yuhang  jyh16213839418@163.com
  * @version 0.2
  * @date 2025-12-21
@@ -16,30 +16,30 @@
 #define ROBOT_MODE_TASK_TIME 1	
 #define RC_ROBOT_MODE_CHANNEL 0
 
-static int robotAuto=0;     //×Ô¶¯/ÊÖ¶¯Ä£Ê½±êÖ¾£¬ÊÖ¶¯0×Ô¶¯1
+static int robotAuto=0;     //è‡ªåŠ¨/æ‰‹åŠ¨æ¨¡å¼æ ‡å¿—ï¼Œæ‰‹åŠ¨0è‡ªåŠ¨1
 static const RC_ctrl_t *rc_p;
-//static const toSTM32_t *nuc_p;  //NUCÊý¾ÝÎ»ÖÃ 
+//static const toSTM32_t *nuc_p;  //NUCæ•°æ®ä½ç½® 
 
-static enum RobotState_e robotState=RobotState_e_Powerless;  //»úÆ÷ÈË³õÊ¼×´Ì¬
-static uint8_t controlmode = 0;		//0£ºÊÖ±ú   1£º¼üÅÌ
+static enum RobotState_e robotState=RobotState_e_Powerless;  //æœºå™¨äººåˆå§‹çŠ¶æ€
+static uint8_t controlmode = 0;		//0ï¼šæ‰‹æŸ„   1ï¼šé”®ç›˜
 extern volatile uint8_t  rc_online;
 
-/*µ±¼üÅÌÓÐÈÎºÎ°´¼ü¿ªÊ¼°´ÏÂºó£¬¾Í×ª»»µ½¼üÅÌºÍÊó±ê¿ØÖÆ¡£
- *µ±Ò£¿ØÆ÷²¦ÂÖ·¢Éú×´Ì¬¸Ä±ä£¬Ò£¿ØÆ÷¿ØÖÆ
+/*å½“é”®ç›˜æœ‰ä»»ä½•æŒ‰é”®å¼€å§‹æŒ‰ä¸‹åŽï¼Œå°±è½¬æ¢åˆ°é”®ç›˜å’Œé¼ æ ‡æŽ§åˆ¶ã€‚
+ *å½“é¥æŽ§å™¨æ‹¨è½®å‘ç”ŸçŠ¶æ€æ”¹å˜ï¼Œé¥æŽ§å™¨æŽ§åˆ¶
  *
  */ 
 
 void robot_total_mode_task(void const *pvParameters)
 {
-    //³õÊ¼»¯Êý¾ÝÖ¸Õë
+    //åˆå§‹åŒ–æ•°æ®æŒ‡é’ˆ
     rc_p=get_remote_control_point();
 //    nuc_p=get_nuc_control_point();
 
     robotAuto=0;
     while (1)
     {
-        // Ò£¿ØÆ÷µôÏßÊ±£¬Ç¿ÖÆ»Øµ½PowerLess×´Ì¬
-        // µ±¼üÅÌÓÐÈÎºÎ°´¼ü¿ªÊ¼°´ÏÂºó£¬¾Í×ª»»µ½¼üÅÌºÍÊó±ê¿ØÖÆÁË
+        // é¥æŽ§å™¨æŽ‰çº¿æ—¶ï¼Œå¼ºåˆ¶å›žåˆ°PowerLessçŠ¶æ€
+        // å½“é”®ç›˜æœ‰ä»»ä½•æŒ‰é”®å¼€å§‹æŒ‰ä¸‹åŽï¼Œå°±è½¬æ¢åˆ°é”®ç›˜å’Œé¼ æ ‡æŽ§åˆ¶äº†
 		
 		CtrlModeDetect();
 
@@ -50,39 +50,39 @@ void robot_total_mode_task(void const *pvParameters)
             continue;
         }
 		
-		if(controlmode==0)//ÊÖ±ú
+		if(controlmode==0)//æ‰‹æŸ„
         {
             if(switch_is_mid(rc_p->rc.s[RC_ROBOT_MODE_CHANNEL]))
             {
-                robotState=RobotState_e_GimbalCar;//·¢ËÍ3,µ×ÅÌ¸úËæÔÆÌ¨
+                robotState=RobotState_e_GimbalCar;//å‘é€3,åº•ç›˜è·Ÿéšäº‘å°
             }
             else if(switch_is_down(rc_p->rc.s[RC_ROBOT_MODE_CHANNEL]))
             {
-                robotState=RobotState_e_Spinner;//·¢ËÍ2£¬Ð¡ÍÓÂÝ
+                robotState=RobotState_e_Spinner;//å‘é€2ï¼Œå°é™€èžº
             }
             else if(switch_is_up(rc_p->rc.s[RC_ROBOT_MODE_CHANNEL]))
             {
                 robotState=RobotState_e_CommonCar;
             }
         }
-		else//¼üÅÌ
+		else//é”®ç›˜
 		{
-			if(rc_p->key.v & KEY_PRESSED_OFFSET_G)   //c¿ªÆôÔÆÌ¨³µÄ£Ê½
+			if(rc_p->key.v & KEY_PRESSED_OFFSET_G)   //cå¼€å¯äº‘å°è½¦æ¨¡å¼
 			{
 				robotState=RobotState_e_GimbalCar;
 			}
 			
-			if(rc_p->key.v & KEY_PRESSED_OFFSET_CTRL)   //ctrl¿ªÆôÐ¡ÍÓÂÝ
+			if(rc_p->key.v & KEY_PRESSED_OFFSET_CTRL)   //ctrlå¼€å¯å°é™€èžº
 			{
 				robotState=RobotState_e_Spinner;
 			}
-			if(rc_p->key.v & KEY_PRESSED_OFFSET_C)		//³µÔÆÌ¨³¯ÏòÎªÕý·½ÏòÄ£Ê½
+			if(rc_p->key.v & KEY_PRESSED_OFFSET_C)		//è½¦äº‘å°æœå‘ä¸ºæ­£æ–¹å‘æ¨¡å¼
 			{
 				robotState=RobotState_e_CommonCar;
 			}
 		}
 		
-		if(rc_p->rc.s[1]==2 || ((rc_p->key.v) & KEY_PRESSED_OFFSET_R))
+		if((rc_p->rc.s[1]==2 || ((rc_p->key.v) & KEY_PRESSED_OFFSET_R)) || (rc_p->mouse.press_r))
         {
             robotAuto=1;
         }

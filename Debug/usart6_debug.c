@@ -2,16 +2,16 @@
 
 extern UART_HandleTypeDef huart6;
 
-// ³õÊ¼»¯
+// åˆå§‹åŒ–
 void USART6_Debug_Init(void)
 {
-    // Èç¹ûĞèÒª¿ÉÒÔÔÚÕâÀïÌí¼Ó³õÊ¼»¯´úÂë
-    // USART6ÒÑ¾­ÔÚCubeMXÖĞ³õÊ¼»¯£¬ÕâÀïÍ¨³£²»ĞèÒª¶îÍâ²Ù×÷
+    // å¦‚æœéœ€è¦å¯ä»¥åœ¨è¿™é‡Œæ·»åŠ åˆå§‹åŒ–ä»£ç 
+    // USART6å·²ç»åœ¨CubeMXä¸­åˆå§‹åŒ–ï¼Œè¿™é‡Œé€šå¸¸ä¸éœ€è¦é¢å¤–æ“ä½œ
     USART6_SendString("USART6 Debug Initialized\r\n");
     USART6_SendString("System Ready!\r\n");
 }
 
-// »ù´¡×Ö·û´®·¢ËÍ
+// åŸºç¡€å­—ç¬¦ä¸²å‘é€
 void USART6_SendString(const char *str)
 {
     if(str == NULL) return;
@@ -19,26 +19,26 @@ void USART6_SendString(const char *str)
     HAL_UART_Transmit(&huart6, (uint8_t*)str, len, HAL_MAX_DELAY);
 }
 
-// ·¢ËÍÔ­Ê¼Êı¾İ
+// å‘é€åŸå§‹æ•°æ®
 void USART6_SendData(uint8_t *data, uint16_t len)
 {
     if(data == NULL || len == 0) return;
     HAL_UART_Transmit(&huart6, data, len, HAL_MAX_DELAY);
 }
 
-// Ê®Áù½øÖÆ¸ñÊ½·¢ËÍÊı¾İ
+// åå…­è¿›åˆ¶æ ¼å¼å‘é€æ•°æ®ï¼›â€œæ•°æ®: â€å‰ç¼€ä¿ç•™åŸæœ‰çš„ GBK å‘é€å­—èŠ‚
 void USART6_SendHex(uint8_t *data, uint16_t len)
 {
-    char hex_buf[64];  // Ôö´ó»º³åÇø
+    char hex_buf[64];  // å¢å¤§ç¼“å†²åŒº
     char temp[8];
     
-    strcpy(hex_buf, "Êı¾İ: ");
+    strcpy(hex_buf, "\312\375\276\335: ");
     for(uint16_t i = 0; i < len; i++)
     {
         if(i < len - 1)
             sprintf(temp, "%02X ", data[i]);
         else
-            sprintf(temp, "%02X", data[i]);  // ×îºóÒ»¸ö²»¼Ó¿Õ¸ñ
+            sprintf(temp, "%02X", data[i]);  // æœ€åä¸€ä¸ªä¸åŠ ç©ºæ ¼
         
         strcat(hex_buf, temp);
     }
@@ -46,7 +46,7 @@ void USART6_SendHex(uint8_t *data, uint16_t len)
     USART6_SendString(hex_buf);
 }
 
-// ¸ñÊ½»¯Êä³öº¯Êı
+// æ ¼å¼åŒ–è¾“å‡ºå‡½æ•°
 void USART6_Printf(const char *format, ...)
 {
     char buffer[256];
@@ -59,7 +59,7 @@ void USART6_Printf(const char *format, ...)
     USART6_SendString(buffer);
 }
 
-// ÖØ¶¨Ïò printf£¨¿ÉÑ¡ÅäÖÃ£©
+// é‡å®šå‘ printfï¼ˆå¯é€‰é…ç½®ï¼‰
 PUTCHAR_PROTOTYPE
 {
     HAL_UART_Transmit(&huart6, (uint8_t *)&ch, 1, HAL_MAX_DELAY);

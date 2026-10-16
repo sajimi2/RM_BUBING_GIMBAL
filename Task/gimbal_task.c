@@ -1,14 +1,14 @@
 /**
  * @file gimbal_task.c
- * @brief ÔÆÌ¨¿ØÖÆÈÎÎñ
+ * @brief äº‘å°æ§åˆ¶ä»»åŠ¡
  * @Auther Jing Yuhang  jyh16213839418@163.com
  * @version 0.3
  * @date 2025-12-21
  *
  *
- * ¹¦ÄÜ¶¨Òå£ºÔÆÌ¨µç»ú¿ØÖÆ£¬°üº¬PitchÖáºÍYawÖáµÄ´®¼¶PID¿ØÖÆ£¬
- * Ö§³ÖÊÖ¶¯Ò£¿ØÆ÷¿ØÖÆ¡¢Êó±ê¿ØÖÆºÍ×Ô¶¯ÊÓ¾õ×ÔÃé¿ØÖÆ¡£
- * Ê¹ÓÃÀï³Ì±®Õ»·¨ÊµÏÖ¶àÈ¦¼ÆÊı£¬È·±£½Ç¶ÈÁ¬Ğø¡£
+ * åŠŸèƒ½å®šä¹‰ï¼šäº‘å°ç”µæœºæ§åˆ¶ï¼ŒåŒ…å«Pitchè½´å’ŒYawè½´çš„ä¸²çº§PIDæ§åˆ¶ï¼Œ
+ * æ”¯æŒæ‰‹åŠ¨é¥æ§å™¨æ§åˆ¶ã€é¼ æ ‡æ§åˆ¶å’Œè‡ªåŠ¨è§†è§‰è‡ªç„æ§åˆ¶ã€‚
+ * ä½¿ç”¨é‡Œç¨‹ç¢‘æ ˆæ³•å®ç°å¤šåœˆè®¡æ•°ï¼Œç¡®ä¿è§’åº¦è¿ç»­ã€‚
  */
 
 #include "cmsis_os.h"
@@ -27,19 +27,19 @@
 #include "shoot_task.h"
 #include "NX_communicate.h"
 
-// ÈÎÎñÖÜÆÚ
+// ä»»åŠ¡å‘¨æœŸ
 #define GIMBAL_TASK_CTRL_TIME 2
 
-// ËÙ¶È»·PID²ÎÊı
+// é€Ÿåº¦ç¯PIDå‚æ•°
 #define PITCH_SPD_KP 4000000.0f
 #define PITCH_SPD_KI 000.0f
 #define PITCH_SPD_KD 1000.0f
 
 #define YAW_SPD_KP 10000000.0f
-#define YAW_SPD_KI 0
+#define YAW_SPD_KI 0	
 #define YAW_SPD_KD 0
 
-// Î»ÖÃ»·PID²ÎÊı
+// ä½ç½®ç¯PIDå‚æ•°
 #define PITCH_AGL_KP 0.015f
 #define PITCH_AGL_KI 0
 #define PITCH_AGL_KD 0.01f
@@ -48,41 +48,37 @@
 #define YAW_AGL_KI 0.00f
 #define YAW_AGL_KD 0.00000f
 
-// ¹¦ÂÊ±£»¤²ÎÊı
+// åŠŸç‡ä¿æŠ¤å‚æ•°
 #define PITCH_VOLT_MAX_OUT 30000.0f
 #define PITCH_VOLT_MAX_IOUT 3000.0f
 #define YAW_VOLT_MAX_OUT 30000.0f
 #define YAW_VOLT_MAX_IOUT 10000.0f
 
-// Î»ÖÃ»·Êä³öÏŞ·ù
+// ä½ç½®ç¯è¾“å‡ºé™å¹…
 #define YAW_AGL_SPD_MAX_OUT (50.0f)
 #define YAW_AGL_SPD_MAX_IOUT (11.7f)
 #define PITCH_AGL_SPD_MAX_OUT (2.0f)
 #define PITCH_AGL_SPD_MAX_IOUT (1.0f)
 
-// Ò¡¸Ë²Ù×÷ÀÛ¼ÆÁ¿²ÎÊı
+// æ‘‡æ†æ“ä½œç´¯è®¡é‡å‚æ•°
 #define YAW_RC_SEN -0.000004f
 #define PITCH_RC_SEN -0.000005f
 #define YAW_MOUSE_SEN -0.000005f
 #define PITCH_MOUSE_SEN -0.000005f
 
-// ±àÂëÆ÷Ïà¹Ø
+// ç¼–ç å™¨ç›¸å…³
 #define ECD_FULL_ROUND 8192
 
-// ËÀÇø²ÎÊı
+// æ­»åŒºå‚æ•°
 #define RC_DEADLINE 10
 #define GIMBAL_DEAD_BOND 0.1
 #define YAW_DEAD_BOND 0.1
 
-// Àï³Ì±®Õ»·¨²ÎÊı
-#define MILESTONE_NUMBER 3
-#define MILESTONE_NEAR_THRESHHOLD 500
+// Pitchè½´è§’åº¦é™å¹…
+#define PITCH_MAX_ANGLE 0.7f  // 0.275763ä¿¯è§’
+#define PITCH_MIN_ANGLE -0.45f //-0.280368ä»°è§’0.22
 
-// PitchÖá½Ç¶ÈÏŞ·ù
-#define PITCH_MAX_ANGLE 0.5f  // 0.275763¸©½Ç
-#define PITCH_MIN_ANGLE -0.3f //-0.280368Ñö½Ç
-
-// Ò£¿ØÆ÷ËÀÇøºêº¯Êı
+// é¥æ§å™¨æ­»åŒºå®å‡½æ•°
 #define rc_deadband_limit(input, output, dealine)        \
     {                                                    \
         if ((input) > (dealine) || (input) < -(dealine)) \
@@ -95,7 +91,7 @@
         }                                                \
     }
 
-// ÏŞ·ùºêº¯Êı
+// é™å¹…å®å‡½æ•°
 #define LimitMax(input, max)   \
     {                          \
         if (input > max)       \
@@ -120,17 +116,10 @@
         }                                      \
     }
 
-// Àï³Ì±®Õ»½á¹¹
-struct milestoneStack_s
-{
-    uint8_t head;
-    uint8_t stack[MILESTONE_NUMBER + 1];
-};
-
-// ÔÆÌ¨µç»ú¿ØÖÆ½á¹¹Ìå
+// äº‘å°ç”µæœºæ§åˆ¶ç»“æ„ä½“
 struct GimbalMotorCtrl_s
 {
-    // ½Ç¶ÈÏà¹Ø
+    // è§’åº¦ç›¸å…³
     const fp32 *AnglePoint;
     fp32 nowAbsoluteAngle;
     fp32 lastAbsoluteAngle;
@@ -139,174 +128,166 @@ struct GimbalMotorCtrl_s
     fp32 radspeed;
     fp32 want_AbsoluteAngleCtrl;
 
-    // ±àÂëÆ÷Ïà¹Ø
+    // ç¼–ç å™¨ç›¸å…³
     const uint16_t *ECDPoint;
     uint16_t maxECD, minECD, middleECD, nowECD;
 
-    // Àï³Ì±®Ïà¹Ø
+    // é‡Œç¨‹ç¢‘ç›¸å…³
     int16_t nowRounds;
     int16_t maxRounds;
-    struct milestoneStack_s mstack;
 
-    // PIDÏà¹Ø
+    // PIDç›¸å…³
     pid_type_def spd_pid;
     pid_type_def agl_pid;
 
-    // ¿ØÖÆÊä³ö
+    // æ§åˆ¶è¾“å‡º
     int16_t Volt_out;
     uint8_t nopowerflag;
 
-    // ÂË²¨Æ÷
+    // æ»¤æ³¢å™¨
     first_order_filter_type_t spd_filter;
 };
 
-// ÔÆÌ¨¿ØÖÆ½á¹¹Ìå
+// äº‘å°æ§åˆ¶ç»“æ„ä½“
 static struct GimbalMotorCtrl_s PitchCtrl, YawCtrl;
 static struct GimbalMotorCtrl_s *gimbalCtrl[2] = {&PitchCtrl, &YawCtrl};
 
-// PID²ÎÊıÊı×é
+// PIDå‚æ•°æ•°ç»„
 static fp32 pitchSpdPIDco[3] = {PITCH_SPD_KP, PITCH_SPD_KI, PITCH_SPD_KD};
 static fp32 yawSpdPIDco[3] = {YAW_SPD_KP, YAW_SPD_KI, YAW_SPD_KD};
 static fp32 pitchAglPIDco[3] = {PITCH_AGL_KP, PITCH_AGL_KI, PITCH_AGL_KD};
 static fp32 yawAglPIDco[3] = {YAW_AGL_KP, YAW_AGL_KI, YAW_AGL_KD};
 
-// Ä£Ê½Ïà¹Ø
+// æ¨¡å¼ç›¸å…³
 static const enum RobotState_e *robotMode;
 static enum RobotState_e lastMode;
 
-// ¿ØÖÆÖ¸Õë
+// æ§åˆ¶æŒ‡é’ˆ
 static const RC_ctrl_t *rc_p;
-static const VisionToGimbal_t *nx_p;
+static const CAN_Send_to_MCU *nx_p;
 
 extern volatile uint8_t rc_online;
 extern int16_t *getTriggerCurrentP(void);
 
-// º¯ÊıÉùÃ÷
+// å‡½æ•°å£°æ˜
 void gimbal_task(void const *pvParameters);
-const struct GimbalToChassis_s *getBadYawWantedSpd(void);
 const struct GimbalMotorCtrl_s *get_wantedyaw_point(void);
-const int16_t *getGimbalNowRoundsPoint(void);
 static void initGimbalCtrl(void);
 void refreshAngleStates(struct GimbalMotorCtrl_s *c);
 void getControlAngles(void);
-void monitorRounds(struct GimbalMotorCtrl_s *c);
 void unitPID_calc(void);
 
 fp32 delta_pitch, delta_yaw;
 /**
- * @brief ÔÆÌ¨Ö÷¿ØÖÆÈÎÎñ
+ * @brief äº‘å°ä¸»æ§åˆ¶ä»»åŠ¡
  */
 void gimbal_task(void const *pvParameters)
 {
     uint8_t i;
 
-    // ³õÊ¼»¯ÑÓ³Ù
+    // åˆå§‹åŒ–å»¶è¿Ÿ
     osDelay(500);
 
-    // ³õÊ¼»¯ÔÆÌ¨¿ØÖÆ
+    // åˆå§‹åŒ–äº‘å°æ§åˆ¶
     initGimbalCtrl();
     robotMode = getRobotPresentMode();
-    rc_p = get_remote_control_point(); // »ñÈ¡Ò£¿ØÆ÷Êı¾İÖ¸Õë
-    nx_p = get_nx_control_point();     // ÊÓ¾õÊı¾İÖ¸Õë
+    rc_p = get_remote_control_point(); // è·å–é¥æ§å™¨æ•°æ®æŒ‡é’ˆ
+    nx_p = get_nx_control_point();     // è§†è§‰æ•°æ®æŒ‡é’ˆ
 
     delta_pitch = nx_p->pitch;
     delta_yaw = nx_p->yaw;
 
-    // ³õÊ¼»¯ÑÓ³Ù
+    // åˆå§‹åŒ–å»¶è¿Ÿ
     osDelay(500);
 
-    // Çå³ıPID»ı·Ö
+    // æ¸…é™¤PIDç§¯åˆ†
     PID_clear(&(YawCtrl.spd_pid));
     PID_clear(&(YawCtrl.agl_pid));
     PID_clear(&(PitchCtrl.spd_pid));
     PID_clear(&(PitchCtrl.agl_pid));
 
-    // ³õÊ¼»¯×´Ì¬
-    lastMode = RobotState_e_Powerless; // ÉÏÒ»´Î³õÊ¼»¯ÎªÎŞÁ¦
+    // åˆå§‹åŒ–çŠ¶æ€
+    lastMode = RobotState_e_Powerless; // ä¸Šä¸€æ¬¡åˆå§‹åŒ–ä¸ºæ— åŠ›
     YawCtrl.nopowerflag = 0;
     PitchCtrl.nopowerflag = 0;
     YawCtrl.want_AbsoluteAngleCtrl = YawCtrl.nowAbsoluteAngle;
     PitchCtrl.want_AbsoluteAngleCtrl = PitchCtrl.nowAbsoluteAngle;
-    // »ñÈ¡²¦µ¯ÂÖµçÁ÷Ö¸Õë
-    int16_t *triggerCurrentP = getTriggerCurrentP(); // ´ÓÁíÒ»¸öÎÄ¼ş»ñÈ¡²¦µ¯ÂÖµç»úµÄµçÁ÷
+    // è·å–æ‹¨å¼¹è½®ç”µæµæŒ‡é’ˆ
+    int16_t *triggerCurrentP = getTriggerCurrentP(); // ä»å¦ä¸€ä¸ªæ–‡ä»¶è·å–æ‹¨å¼¹è½®ç”µæœºçš„ç”µæµ
 
-    // Ö÷¿ØÖÆÑ­»·
+    // ä¸»æ§åˆ¶å¾ªç¯
     while (1)
     {
-        // Ë¢ĞÂ½Ç¶È×´Ì¬
+        // åˆ·æ–°è§’åº¦çŠ¶æ€
         for (i = 0; i < 2; i++)
             refreshAngleStates(gimbalCtrl[i]);
 
-        // »ñÈ¡¿ØÖÆ½Ç¶È
+        // è·å–æ§åˆ¶è§’åº¦
         getControlAngles();
 
-        // ¼à¿ØÈ¦Êı
-        for (i = 0; i < 2; i++)
-            monitorRounds(gimbalCtrl[i]);
-
-        // ¼ÆËãPID
+        // è®¡ç®—PID
         unitPID_calc();
 
-        // Ò£¿ØÆ÷ÔÚÏßÕì²â
+        // é¥æ§å™¨åœ¨çº¿ä¾¦æµ‹
 		// LYL
-//        if (rc_online == 0)
-//        {
-//            YawCtrl.Volt_out = 0;
-//            PitchCtrl.Volt_out = 0;
-//        }
+        if (rc_online == 0)
+        {
+            YawCtrl.Volt_out = 0;
+            PitchCtrl.Volt_out = 0;
+        }
+		else
+		{
+		}
 
-        // ·¢ËÍ¿ØÖÆÖ¸Áîµ½CAN×ÜÏß
+        // å‘é€æ§åˆ¶æŒ‡ä»¤åˆ°CANæ€»çº¿
         CAN_cmd_gimbal(YawCtrl.Volt_out, PitchCtrl.Volt_out, *triggerCurrentP, 0);
 
-        // ÈÎÎñÑÓÊ±
+        // ä»»åŠ¡å»¶æ—¶
         osDelay(GIMBAL_TASK_CTRL_TIME);
     }
 }
 
 /**
- * @brief ³õÊ¼»¯ÔÆÌ¨¿ØÖÆ½á¹¹Ìå
+ * @brief åˆå§‹åŒ–äº‘å°æ§åˆ¶ç»“æ„ä½“
  */
 #define PITCH_SPD_FILTER_NUM 0.001f
 #define YAW_SPD_FILTER_NUM 0.001f
 static void initGimbalCtrl(void)
 {
-    // ³õÊ¼»¯½Ç¶ÈÖ¸Õë
+    // åˆå§‹åŒ–è§’åº¦æŒ‡é’ˆ
     YawCtrl.AnglePoint = &(get_INS()->Yaw);
     PitchCtrl.AnglePoint = &(get_INS()->Pitch);
 
-    // ³õÊ¼»¯±àÂëÆ÷Ö¸Õë
+    // åˆå§‹åŒ–ç¼–ç å™¨æŒ‡é’ˆ
     YawCtrl.ECDPoint = &(get_yaw_gimbal_motor_measure_point()->ecd);
     PitchCtrl.ECDPoint = &(get_pitch_gimbal_motor_measure_point()->ecd);
 
-    // PID³õÊ¼»¯
+    // PIDåˆå§‹åŒ–
     PID_init(&(YawCtrl.spd_pid), PID_POSITION, yawSpdPIDco, YAW_VOLT_MAX_OUT, YAW_VOLT_MAX_IOUT);
     PID_init(&(PitchCtrl.spd_pid), PID_POSITION, pitchSpdPIDco, PITCH_VOLT_MAX_OUT, PITCH_VOLT_MAX_IOUT);
 
     PID_init(&(PitchCtrl.agl_pid), PID_POSITION, pitchAglPIDco, PITCH_AGL_SPD_MAX_OUT, PITCH_AGL_SPD_MAX_IOUT);
     PID_init(&(YawCtrl.agl_pid), PID_POSITION, yawAglPIDco, YAW_AGL_SPD_MAX_OUT, YAW_AGL_SPD_MAX_IOUT);
 
-    // ÂË²¨³õÊ¼»¯
+    // æ»¤æ³¢åˆå§‹åŒ–
     const static fp32 gimbal_pitch_order_filter[1] = {PITCH_SPD_FILTER_NUM};
     const static fp32 gimbal_yaw_order_filter[1] = {YAW_SPD_FILTER_NUM};
 
     first_order_filter_init(&(PitchCtrl.spd_filter), GIMBAL_TASK_CTRL_TIME, gimbal_pitch_order_filter);
     first_order_filter_init(&(YawCtrl.spd_filter), GIMBAL_TASK_CTRL_TIME, gimbal_yaw_order_filter);
 
-    // ³õÊ¼»¯µ±Ç°×´Ì¬
+    // åˆå§‹åŒ–å½“å‰çŠ¶æ€
     for (uint8_t i = 0; i < 2; i++)
     {
         (gimbalCtrl[i])->nopowerflag = 0;
         (gimbalCtrl[i])->nowAbsoluteAngle = *((gimbalCtrl[i])->AnglePoint);
         (gimbalCtrl[i])->nowTime = HAL_GetTick();
         gimbalCtrl[i]->want_AbsoluteAngleCtrl = (gimbalCtrl[i])->nowAbsoluteAngle;
-        // Àï³Ì±®Õ»³õÊ¼»¯
-        (gimbalCtrl[i]->mstack).head = 0;
-        (gimbalCtrl[i]->mstack).stack[0] = 0;
     }
 }
 
 /**
- * @brief ½«½Ç¶È»¯Îª(-PI,PI)·¶Î§ÄÚ
+ * @brief å°†è§’åº¦åŒ–ä¸º(-PI,PI)èŒƒå›´å†…
  *
  * @param rawAngle
  * @return fp32
@@ -321,7 +302,7 @@ fp32 radFormat(fp32 rawAngle) // test done
 }
 
 /**
- * @brief ½«ECD²îÖµµÈ»¯Îª(0,8191)·¶Î§
+ * @brief å°†ECDå·®å€¼ç­‰åŒ–ä¸º(0,8191)èŒƒå›´
  *
  * @param rawECD
  * @return uint16_t
@@ -336,7 +317,7 @@ static uint16_t ECDFormat(int16_t rawECD) // test done
 }
 
 /**
- * @brief ½«0-8191µÄECDÖµ×ª»¯Îª-PI~PIµÄ»¡¶ÈÖµ,Ö»ÊÇÓ³ÉäÒ»Ò»¹ıÈ¥
+ * @brief å°†0-8191çš„ECDå€¼è½¬åŒ–ä¸º-PI~PIçš„å¼§åº¦å€¼,åªæ˜¯æ˜ å°„ä¸€ä¸€è¿‡å»
  * 0->-PI,8192->PI
  *
  * @param ecd
@@ -348,11 +329,11 @@ fp32 ECD2Rad(uint16_t ecd) // test done
 }
 
 /**
- * @brief ¼ÆËã×ªÈ¦µÄPID¡£ÄÚ²¿errorÏÈÑ­»·×ª»¯Îª(-PI,PI)·¶Î§
+ * @brief è®¡ç®—è½¬åœˆçš„PIDã€‚å†…éƒ¨errorå…ˆå¾ªç¯è½¬åŒ–ä¸º(-PI,PI)èŒƒå›´
  *
  * @param pid
- * @param ref ·´À¡Öµ
- * @param set Éè¶¨Öµ
+ * @param ref åé¦ˆå€¼
+ * @param set è®¾å®šå€¼
  * @return fp32
  */
 fp32 gimbal_PID_calc(pid_type_def *pid, fp32 ref, fp32 set)
@@ -400,7 +381,7 @@ fp32 gimbal_PID_calc(pid_type_def *pid, fp32 ref, fp32 set)
 }
 
 /**
- * @brief Ë¢ĞÂ½Ç¶È×´Ì¬£¨¼ÆËãµ±Ç°½Ç¶ÈºÍ½ÇËÙ¶È£©
+ * @brief åˆ·æ–°è§’åº¦çŠ¶æ€ï¼ˆè®¡ç®—å½“å‰è§’åº¦å’Œè§’é€Ÿåº¦ï¼‰
  */
 void refreshAngleStates(struct GimbalMotorCtrl_s *c)
 {
@@ -410,7 +391,7 @@ void refreshAngleStates(struct GimbalMotorCtrl_s *c)
     c->nowAbsoluteAngle = *(c->AnglePoint);
     c->nowTime = xTaskGetTickCount();
 
-    uint32_t dt = c->nowTime - c->lastTime; // dtµ¥Î»ÊÇms
+    uint32_t dt = c->nowTime - c->lastTime; // dtå•ä½æ˜¯ms
     if (dt == 0)
     {
         c->radspeed = 0.0f;
@@ -430,23 +411,23 @@ void refreshAngleStates(struct GimbalMotorCtrl_s *c)
 }
 
 /**
- * @brief »ñÈ¡ÔÆÌ¨¿ØÖÆ½Ç¶È£¨×´Ì¬»ú£©
+ * @brief è·å–äº‘å°æ§åˆ¶è§’åº¦ï¼ˆçŠ¶æ€æœºï¼‰
  *
- * ×´Ì¬»ú°üº¬ÈıÖÖÖ÷Òª×´Ì¬£º
- * 1. ÎŞÁ¦Ä£Ê½£¨RobotState_e_Powerless£©
- * 2. ÊÖ¶¯¿ØÖÆÄ£Ê½£¨·Ç×Ô¶¯Ä£Ê½£©
- * 3. ×Ô¶¯¿ØÖÆÄ£Ê½£¨robotIsAuto()·µ»Ø1£©
+ * çŠ¶æ€æœºåŒ…å«ä¸‰ç§ä¸»è¦çŠ¶æ€ï¼š
+ * 1. æ— åŠ›æ¨¡å¼ï¼ˆRobotState_e_Powerlessï¼‰
+ * 2. æ‰‹åŠ¨æ§åˆ¶æ¨¡å¼ï¼ˆéè‡ªåŠ¨æ¨¡å¼ï¼‰
+ * 3. è‡ªåŠ¨æ§åˆ¶æ¨¡å¼ï¼ˆrobotIsAuto()è¿”å›1ï¼‰
  *
- * ×¢Òâ£º´ÓÎŞÁ¦Ä£Ê½ÇĞ»»µ½ÆäËûÄ£Ê½Ê±£¬ĞèÒª³õÊ¼»¯Ä¿±ê½Ç¶ÈÎªµ±Ç°½Ç¶È
+ * æ³¨æ„ï¼šä»æ— åŠ›æ¨¡å¼åˆ‡æ¢åˆ°å…¶ä»–æ¨¡å¼æ—¶ï¼Œéœ€è¦åˆå§‹åŒ–ç›®æ ‡è§’åº¦ä¸ºå½“å‰è§’åº¦
  */
 void getControlAngles(void)
 {
-    // »ñÈ¡Ò£¿ØÆ÷ÊäÈë£¨´øËÀÇø´¦Àí£©
+    // è·å–é¥æ§å™¨è¾“å…¥ï¼ˆå¸¦æ­»åŒºå¤„ç†ï¼‰
     int16_t yaw_channel = 0, pitch_channel = 0;
-    rc_deadband_limit(rc_p->rc.ch[0], yaw_channel, RC_DEADLINE);   // ÓÒÒ¡¸ËXÖá
-    rc_deadband_limit(rc_p->rc.ch[1], pitch_channel, RC_DEADLINE); // ÓÒÒ¡¸ËYÖá
+    rc_deadband_limit(rc_p->rc.ch[0], yaw_channel, RC_DEADLINE);   // å³æ‘‡æ†Xè½´
+    rc_deadband_limit(rc_p->rc.ch[1], pitch_channel, RC_DEADLINE); // å³æ‘‡æ†Yè½´
 
-	// Çå³ıÎŞÁ¦±êÖ¾
+	// æ¸…é™¤æ— åŠ›æ ‡å¿—
 	// LYL
     YawCtrl.nopowerflag = 0;
     PitchCtrl.nopowerflag = 0;
@@ -454,70 +435,69 @@ void getControlAngles(void)
     if (*robotMode == RobotState_e_Powerless)
     {
 
-        // ÉèÖÃÎŞÁ¦±êÖ¾
-        YawCtrl.nopowerflag = 1; // 1±íÊ¾ÎŞÁ¦£¬µç»úÊä³öÎªÁã
+        // è®¾ç½®æ— åŠ›æ ‡å¿—
+        YawCtrl.nopowerflag = 1; // 1è¡¨ç¤ºæ— åŠ›ï¼Œç”µæœºè¾“å‡ºä¸ºé›¶
         PitchCtrl.nopowerflag = 1;
 
         return;
     }
 
 	// LYL
-    // ×´Ì¬×ª»»´¦Àí£º´ÓÎŞÁ¦Ä£Ê½ÇĞ»»µ½ÆäËûÄ£Ê½
+    // çŠ¶æ€è½¬æ¢å¤„ç†ï¼šä»æ— åŠ›æ¨¡å¼åˆ‡æ¢åˆ°å…¶ä»–æ¨¡å¼
     if (lastMode == RobotState_e_Powerless)
     {
-        // ³õÊ¼»¯Ä¿±ê½Ç¶ÈÎªµ±Ç°Î»ÖÃ£¬±ÜÃâÌø±ä
+        // åˆå§‹åŒ–ç›®æ ‡è§’åº¦ä¸ºå½“å‰ä½ç½®ï¼Œé¿å…è·³å˜
         PitchCtrl.want_AbsoluteAngleCtrl = PitchCtrl.nowAbsoluteAngle;
         YawCtrl.want_AbsoluteAngleCtrl = YawCtrl.nowAbsoluteAngle;
 
-        // Çå³ıÎŞÁ¦±êÖ¾
-//        YawCtrl.nopowerflag = 0;
-//        PitchCtrl.nopowerflag = 0;
+        // æ¸…é™¤æ— åŠ›æ ‡å¿—
+        YawCtrl.nopowerflag = 0;
+        PitchCtrl.nopowerflag = 0;
     }
+	
+	
+    // è‡ªåŠ¨æ§åˆ¶æ¨¡å¼
 
-    // ×Ô¶¯¿ØÖÆÄ£Ê½
+	delta_pitch = -(float)(nx_p->pitch)*3.1415926f/32767-PitchCtrl.nowAbsoluteAngle;
+    delta_yaw = (float)(nx_p->yaw)*3.1415926f/32767-YawCtrl.nowAbsoluteAngle;
+//	if(delta_pitch <= target && delta_pitch >= target)
+//	{
+//		delta_pitch = 0;
+//	}
+//	
+//	if(delta_yaw <= target && delta_yaw >= -target)
+//	{
+//		delta_yaw = 0;
+//	}
 	// LYL
     if (robotIsAuto() || rc_p->rc.s[1]==2 )
     {
 		// LYL
-        if (data_ready == 1 && nx_p->mode != 0)
+        if (data_ready == 1 )//&& nx_p->mode != 0)
         {
-            delta_pitch = nx_p->pitch;
-            delta_yaw = nx_p->yaw;
+            
+            // Pitchè½´è‡ªåŠ¨æ§åˆ¶
+            PitchCtrl.want_AbsoluteAngleCtrl += delta_pitch; // è§†è§‰ç›´æ¥ç»™å®šç›®æ ‡è§’åº¦
 
-            // PitchÖá×Ô¶¯¿ØÖÆ
-            if (delta_pitch > 0.00001f || delta_pitch < -0.00001f)
-            {
-                PitchCtrl.want_AbsoluteAngleCtrl = delta_pitch; // ÊÓ¾õÖ±½Ó¸ø¶¨Ä¿±ê½Ç¶È
-            }
-            else
-            {
-                PitchCtrl.want_AbsoluteAngleCtrl = PitchCtrl.nowAbsoluteAngle; // ÎŞÓĞĞ§Êı¾İ±£³Öµ±Ç°½Ç¶È
-            }
-
-            // YawÖá×Ô¶¯¿ØÖÆ
-            if (delta_yaw > 0.00001f || delta_yaw < -0.00001f)
-            {
-                YawCtrl.want_AbsoluteAngleCtrl = delta_yaw; // ÊÓ¾õÖ±½Ó¸ø¶¨Ä¿±ê½Ç¶È
-            }
-            else
-            {
-                YawCtrl.want_AbsoluteAngleCtrl = YawCtrl.nowAbsoluteAngle; // ÎŞÓĞĞ§Êı¾İ±£³Öµ±Ç°½Ç¶È
-            }
-
+            // Yawè½´è‡ªåŠ¨æ§åˆ¶
+            YawCtrl.want_AbsoluteAngleCtrl += delta_yaw; // è§†è§‰ç›´æ¥ç»™å®šç›®æ ‡è§’åº¦
+				
             data_ready = 0;
         }
-    } else { // LYL
-        // PitchÖáÊÖ¶¯¿ØÖÆ£¨»ı·ÖÀÛ¼Ó·½Ê½£©
+    } 
+	else
+	{
+        // Pitchè½´æ‰‹åŠ¨æ§åˆ¶ï¼ˆç§¯åˆ†ç´¯åŠ æ–¹å¼ï¼‰
         PitchCtrl.want_AbsoluteAngleCtrl +=
-            1 * pitch_channel * PITCH_RC_SEN        // Ò£¿ØÆ÷¿ØÖÆ
-            + 10 * rc_p->mouse.y * PITCH_MOUSE_SEN; // Êó±ê¿ØÖÆ
+            1 * pitch_channel * PITCH_RC_SEN        // é¥æ§å™¨æ§åˆ¶
+            - 10 * rc_p->mouse.y * PITCH_MOUSE_SEN; // é¼ æ ‡æ§åˆ¶
 
-        // YawÖáÊÖ¶¯¿ØÖÆ£¨»ı·ÖÀÛ¼Ó·½Ê½£©
+        // Yawè½´æ‰‹åŠ¨æ§åˆ¶ï¼ˆç§¯åˆ†ç´¯åŠ æ–¹å¼ï¼‰
         YawCtrl.want_AbsoluteAngleCtrl +=
-            5 * yaw_channel * YAW_RC_SEN          // Ò£¿ØÆ÷¿ØÖÆ
-            + 20 * rc_p->mouse.x * YAW_MOUSE_SEN; // Êó±ê¿ØÖÆ
+            5 * yaw_channel * YAW_RC_SEN          // é¥æ§å™¨æ§åˆ¶
+            + 20 * rc_p->mouse.x * YAW_MOUSE_SEN; // é¼ æ ‡æ§åˆ¶
 
-        // YawÖá½Ç¶È·¶Î§ÏŞÖÆ£¨±£³ÖÔÚ[-¦Ğ, ¦Ğ]Ö®¼ä£©
+        // Yawè½´è§’åº¦èŒƒå›´é™åˆ¶ï¼ˆä¿æŒåœ¨[-Ï€, Ï€]ä¹‹é—´ï¼‰
         if (YawCtrl.want_AbsoluteAngleCtrl >= 3.086f)
         {
             YawCtrl.want_AbsoluteAngleCtrl -= 2 * PI;
@@ -528,63 +508,12 @@ void getControlAngles(void)
         }
     }
 
-    // ¼ÇÂ¼µ±Ç°Ä£Ê½£¬ÓÃÓÚÏÂÒ»´Î×´Ì¬×ª»»ÅĞ¶Ï
+    // è®°å½•å½“å‰æ¨¡å¼ï¼Œç”¨äºä¸‹ä¸€æ¬¡çŠ¶æ€è½¬æ¢åˆ¤æ–­
     lastMode = *robotMode;
 }
 
 /**
- * @brief ¼à¿Ø×ª¹ıµÄÈ¦Êı£¨Àï³Ì±®Õ»·¨£©
- */
-void monitorRounds(struct GimbalMotorCtrl_s *c)
-{
-    // ¼ÆËãµ±Ç°Ïà¶ÔÓÚÖĞ¼äÎ»ÖÃµÄECDÖµ
-    fp32 relativeRealECD = ECDFormat((int16_t)c->nowECD - (int16_t)c->middleECD);
-
-    // ¼ì²éÊÇ·ñ¿¿½üÃ¿¸öÀï³Ì±®µã
-    for (uint8_t j = 0; j < MILESTONE_NUMBER; j++)
-    {
-        // ¼ÆËãµ±Ç°Î»ÖÃÓëÀï³Ì±®jµÄ¾àÀë
-        if (ECDFormat(relativeRealECD - j * ECD_FULL_ROUND / MILESTONE_NUMBER) < MILESTONE_NEAR_THRESHHOLD)
-        {
-            // Èç¹ûµ½´ïÁËÒ»¸öĞÂµÄÀï³Ì±®µã£¨ÓëÕ»¶¥²»Í¬£©
-            if (j != c->mstack.stack[c->mstack.head])
-            {
-                // ½«ĞÂÀï³Ì±®µãÑ¹ÈëÕ»
-                c->mstack.head++;
-                c->mstack.stack[c->mstack.head] = j;
-            }
-        }
-    }
-
-    // Ïû³ı¶¶¶¯¼ì²â£¨ABBAÄ£Ê½£©
-    if (((c->mstack.head) - 2) >= 0)
-    {
-        if (c->mstack.stack[c->mstack.head] == c->mstack.stack[c->mstack.head - 2])
-        {
-            // ³öÏÖABBA¶¶¶¯£¬»ØÍË2²½
-            c->mstack.head -= 2;
-        }
-    }
-
-    // ¼ì²âÍêÕû×ªÈ¦£¨ABCÄ£Ê½£©
-    if (((c->mstack.head) - 3) >= 0)
-    {
-        if (c->mstack.stack[c->mstack.head] == c->mstack.stack[c->mstack.head - 3])
-        {
-            // ¼ì²âµ½ÍêÕû×ªÈ¦£¨1¡ú2¡ú3¡ú1£©
-            if (c->mstack.stack[1] == 1) // ÅĞ¶Ï·½Ïò£ºÕıÏò£¨0¡ú1¡ú2¡ú0£©
-                c->nowRounds += 1;       // Õı×ªÒ»È¦
-            else
-                c->nowRounds -= 1; // ·´×ªÒ»È¦
-
-            // Çå¿ÕÕ»£¬ÖØĞÂ¿ªÊ¼¼ÆÊı
-            c->mstack.head = 0;
-        }
-    }
-}
-
-/**
- * @brief µ¥ÔªPID¼ÆËãº¯Êı£¨°üº¬Î»ÖÃ»·ºÍËÙ¶È»·£©
+ * @brief PIDè®¡ç®—å‡½æ•°ï¼ˆåŒ…å«ä½ç½®ç¯å’Œé€Ÿåº¦ç¯ï¼‰
  */
 void unitPID_calc(void)
 {
@@ -598,25 +527,25 @@ void unitPID_calc(void)
         PitchCtrl.want_AbsoluteAngleCtrl = PITCH_MIN_ANGLE;
     }
 
-    // YawÖáÎ»ÖÃ»·PID¼ÆËã
+    // Yawè½´ä½ç½®ç¯PIDè®¡ç®—
     gimbal_PID_calc(&(YawCtrl.agl_pid), YawCtrl.nowAbsoluteAngle, YawCtrl.want_AbsoluteAngleCtrl);
-    // YawÖáËÙ¶È»·PID¼ÆËã
+    // Yawè½´é€Ÿåº¦ç¯PIDè®¡ç®—
     PID_calc(&(YawCtrl.spd_pid), YawCtrl.radspeed, YawCtrl.agl_pid.out);
     YawCtrl.Volt_out = YawCtrl.spd_pid.out;
 
-    // YawÖáÎŞÁ¦±êÖ¾¼ì²é
+    // Yawè½´æ— åŠ›æ ‡å¿—æ£€æŸ¥
     if (YawCtrl.nopowerflag)
     {
         YawCtrl.Volt_out = 0;
     }
 
-    // PitchÖáÎ»ÖÃ»·PID¼ÆËã
+    // Pitchè½´ä½ç½®ç¯PIDè®¡ç®—
     gimbal_PID_calc(&(PitchCtrl.agl_pid), PitchCtrl.nowAbsoluteAngle, PitchCtrl.want_AbsoluteAngleCtrl);
-    // PitchÖáËÙ¶È»·PID¼ÆËã
+    // Pitchè½´é€Ÿåº¦ç¯PIDè®¡ç®—
     PID_calc(&(PitchCtrl.spd_pid), PitchCtrl.radspeed, PitchCtrl.agl_pid.out);
-    PitchCtrl.Volt_out = PitchCtrl.spd_pid.out;
+    PitchCtrl.Volt_out = -PitchCtrl.spd_pid.out;//changedv2
 
-    // PitchÖáÎŞÁ¦±êÖ¾¼ì²é
+    // Pitchè½´æ— åŠ›æ ‡å¿—æ£€æŸ¥
     if (PitchCtrl.nopowerflag)
     {
         PitchCtrl.Volt_out = 0;
@@ -624,47 +553,40 @@ void unitPID_calc(void)
 }
 
 /**
- * @brief »ñÈ¡YawÖá¿ØÖÆ½á¹¹ÌåÖ¸Õë
+ * @brief è·å–Yawè½´æ§åˆ¶ç»“æ„ä½“æŒ‡é’ˆ
  */
 const struct GimbalMotorCtrl_s *get_wantedyaw_point(void)
 {
     return &YawCtrl;
 }
 /**
- * @brief »ñÈ¡PitchÖá¿ØÖÆ½á¹¹ÌåÖ¸Õë
+ * @brief è·å–Pitchè½´æ§åˆ¶ç»“æ„ä½“æŒ‡é’ˆ
  */
 const struct GimbalMotorCtrl_s *get_wantedpitch_point(void)
 {
     return &PitchCtrl;
 }
 
-/**
- * @brief »ñÈ¡ÔÆÌ¨µ±Ç°È¦ÊıÖ¸Õë
- */
-const int16_t *getGimbalNowRoundsPoint(void)
-{
-    return &(YawCtrl.nowRounds);
-}
-// »ñÈ¡YawÖáµ±Ç°½Ç¶È
+// è·å–Yawè½´å½“å‰è§’åº¦
 fp32 get_yaw_current_angle(void)
 {
     return YawCtrl.nowAbsoluteAngle;
 }
 
-// »ñÈ¡YawÖáµ±Ç°½ÇËÙ¶È£¨»¡¶È/Ãë£©
+// è·å–Yawè½´å½“å‰è§’é€Ÿåº¦ï¼ˆå¼§åº¦/ç§’ï¼‰
 fp32 get_yaw_current_speed(void)
 {
-    return YawCtrl.radspeed * 1000.0f; // ×ª»»Îª»¡¶È/Ãë
+    return YawCtrl.radspeed * 1000.0f; // è½¬æ¢ä¸ºå¼§åº¦/ç§’
 }
 
-// »ñÈ¡PitchÖáµ±Ç°½Ç¶È
+// è·å–Pitchè½´å½“å‰è§’åº¦
 fp32 get_pitch_current_angle(void)
 {
     return PitchCtrl.nowAbsoluteAngle;
 }
 
-// »ñÈ¡PitchÖáµ±Ç°½ÇËÙ¶È£¨»¡¶È/Ãë£©
+// è·å–Pitchè½´å½“å‰è§’é€Ÿåº¦ï¼ˆå¼§åº¦/ç§’ï¼‰
 fp32 get_pitch_current_speed(void)
 {
-    return PitchCtrl.radspeed * 1000.0f; // ×ª»»Îª»¡¶È/Ãë
+    return PitchCtrl.radspeed * 1000.0f; // è½¬æ¢ä¸ºå¼§åº¦/ç§’
 }

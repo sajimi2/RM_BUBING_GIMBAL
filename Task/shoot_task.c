@@ -1,14 +1,14 @@
 /**
  * @file shoot_task.c
- * @brief ·¢Éä¿ØÖÆÈÎÎñ
+ * @brief å‘å°„æ§åˆ¶ä»»åŠ¡
  * @Auther Jing Yuhang   jyh16213839418@163.com
  * @version 0.2
  * @date 2025-12-21
  *
  *
- * ¹¦ÄÜ¶¨Òå£ºÔÆÌ¨Ä¦²ÁÂÖºÍ²¦µ¯ÂÖµç»ú¿ØÖÆ
- * Ö§³ÖÊÖ¶¯Ò£¿ØÆ÷¿ØÖÆ¡¢×Ô¶¯ÊÓ¾õ×ÔÃé¿ØÖÆ
- * Ê¹ÓÃÀï³Ì±®Õ»·¨ÊµÏÖ¶àÈ¦¼ÆÊı£¬ÒÔÊµÏÖ¾«×¼·¢ÉäÒ»¿Å
+ * åŠŸèƒ½å®šä¹‰ï¼šäº‘å°æ‘©æ“¦è½®å’Œæ‹¨å¼¹è½®ç”µæœºæ§åˆ¶
+ * æ”¯æŒæ‰‹åŠ¨é¥æ§å™¨æ§åˆ¶ã€è‡ªåŠ¨è§†è§‰è‡ªç„æ§åˆ¶
+ * ä½¿ç”¨é‡Œç¨‹ç¢‘æ ˆæ³•å®ç°å¤šåœˆè®¡æ•°ï¼Œä»¥å®ç°ç²¾å‡†å‘å°„ä¸€é¢—
  */
 #include "cmsis_os.h"
 #include "pid.h"
@@ -19,10 +19,15 @@
 #include "CAN_recieve_send.h"
 #include "INS_task.h"
 #include "main.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
-//ÈÎÎñÊ±³¤³£Á¿
+//ä»»åŠ¡æ—¶é•¿å¸¸é‡
 #define SHOOT_TASK_INIT_TIME 500
 #define SHOOT_CTRL_TIME 5
+
+static TickType_t shootOneStartTime = 0;
+#define SHOOT_ONE_DURATION_TICKS pdMS_TO_TICKS(41)  // 200æ¯«ç§’è½¬æ¢ä¸ºticks
 
 #define TRIGGER_ROUNDS_FOR_A_BULLET_A 7
 #define TRIGGER_ROUNDS_FOR_A_BULLET_B 8
@@ -30,66 +35,51 @@
 #define ECD_FULL_ROUND 8192
 #define DEAD_BOND 5
 
-//µç»úËÙ¶È»·PID
+//ç”µæœºé€Ÿåº¦ç¯PID
 #define M3508_MOTOR_SPEED_PID_KP 60000.0f
 #define M3508_MOTOR_SPEED_PID_KI 0.0f
 #define M3508_MOTOR_SPEED_PID_KD 0.0f
 
 #define M2006_MOTOR_SPEED_PID_KP 20000.0f
-#define M2006_MOTOR_SPEED_PID_KI 0.0f   //²»ÒªÕâ¸ö»ı·ÖÏî£¬·ñÔòÁ¬Ğø·¢ÉäÍ£Ö¹ºó»¹»á×ª
+#define M2006_MOTOR_SPEED_PID_KI 0.0f   //ä¸è¦è¿™ä¸ªç§¯åˆ†é¡¹ï¼Œå¦åˆ™è¿ç»­å‘å°„åœæ­¢åè¿˜ä¼šè½¬
 #define M2006_MOTOR_SPEED_PID_KD 1000.0f
 
 #define MAX_MOTOR_3508_CURRENT 30000.0f
 #define MAX_MOTOR_2006_CURRENT 30000.0f
 
-#define M3505_MOTOR_SHOOT_SPEED_PID_MAX_OUT    MAX_MOTOR_3508_CURRENT  // PID×ÜÊä³ö×î´óÖµ
-#define M3505_MOTOR_SHOOT_SPEED_PID_MAX_IOUT   2000.0f                 // PID»ı·ÖÏî×î´óÖµ
+#define M3505_MOTOR_SHOOT_SPEED_PID_MAX_OUT    MAX_MOTOR_3508_CURRENT  // PIDæ€»è¾“å‡ºæœ€å¤§å€¼
+#define M3505_MOTOR_SHOOT_SPEED_PID_MAX_IOUT   2000.0f                 // PIDç§¯åˆ†é¡¹æœ€å¤§å€¼
 
-#define M2006_MOTOR_SPEED_PID_MAX_OUT          MAX_MOTOR_2006_CURRENT  // PID×ÜÊä³ö×î´óÖµ
-#define M2006_MOTOR_SPEED_PID_MAX_IOUT         2000.0f                 // PID»ı·ÖÏî×î´óÖµ
+#define M2006_MOTOR_SPEED_PID_MAX_OUT          MAX_MOTOR_2006_CURRENT  // PIDæ€»è¾“å‡ºæœ€å¤§å€¼
+#define M2006_MOTOR_SPEED_PID_MAX_IOUT         2000.0f                 // PIDç§¯åˆ†é¡¹æœ€å¤§å€¼
 
 #define SHOOT_M3508_MOTOR_RPM_TO_VECTOR (0.000415809748903494517209f/5)
 #define SHOOT_M2006_MOTOR_RPM_TO_VECTOR (0.000415809748903494517209f/5)
 
-#define MILESTONE_NEAR_THRESHHOLD 150		//Àï³Ì±®Õ»·¨²ÎÊı
-#define MILESTONE_NUMBER 3
-struct milestoneStack_s {
-    uint8_t head;
-    uint8_t stack[MILESTONE_NUMBER+1];
-};
-struct TriggerControl_s{
-    struct milestoneStack_s mstack; 	//Àï³Ì±®Õ»
-    const uint16_t * ECDPoint;          //µç»úECDËùÔÚÎ»ÖÃ
-    uint16_t    initECD;                //³õÊ¼ECD
-    uint16_t    nowECD;                 //ÏÖÔÚµÄECD
-    int16_t     nowRounds;              //ÏÖÔÚ×ª¹ıµÄÈ¦Êı
-};
-
 const static fp32 fric_motor_speed_pid[3] = {M3508_MOTOR_SPEED_PID_KP, M3508_MOTOR_SPEED_PID_KI, M3508_MOTOR_SPEED_PID_KD};
 const static fp32 trigger_motor_speed_pid[3] = {M2006_MOTOR_SPEED_PID_KP, M2006_MOTOR_SPEED_PID_KI, M2006_MOTOR_SPEED_PID_KD};
 
-//²¦µ¯ÂÖµç»úÄ£Ê½Ã¶¾ÙÀàĞÍ
+//æ‹¨å¼¹è½®ç”µæœºæ¨¡å¼æšä¸¾ç±»å‹
 enum TriggerMode_e{
-    TriggerMode_e_Stop,         //Í£Ö¹·¢Éä
-    TriggerMode_e_ShootOne,     //·¢ÉäÒ»¸ö£¬¿¿²¦µ¯ÂÖ¼õËÙÇ°µÄµç»ú×ª4È¦¡£¶ÔÓ¦µ¯ÅÌÂÖ×Ó×ªÒ»¸ñ
-    TriggerMode_e_ShootMulti,   //¶à·¢£¬ÆäÊµÊÇµÈ´ı½øÈë·¢ÉäÒ»¸öµÄ×´Ì¬
+    TriggerMode_e_Stop,         //åœæ­¢å‘å°„
+    TriggerMode_e_ShootOne,     //å‘å°„ä¸€ä¸ªï¼Œé æ‹¨å¼¹è½®å‡é€Ÿå‰çš„ç”µæœºè½¬4åœˆã€‚å¯¹åº”å¼¹ç›˜è½®å­è½¬ä¸€æ ¼
+    TriggerMode_e_ShootMulti,   //å¤šå‘ï¼Œå…¶å®æ˜¯ç­‰å¾…è¿›å…¥å‘å°„ä¸€ä¸ªçš„çŠ¶æ€
 	TriggerMode_e_StuckSolve,
 };
 
-static const VisionToGimbal_t *nx_p;
+static const CAN_Send_to_MCU *nx_p;
 static const RC_ctrl_t *rc_p;
-static int16_t trigger_state=3;//²¦¸Ë×´Ì¬
-static int16_t wheel=0;		   //²¦ÂÖÖµ
+static int16_t trigger_state=3;//æ‹¨æ†çŠ¶æ€
+static int16_t wheel=0;		   //æ‹¨è½®å€¼
 
-// Ä¦²ÁÂÖ¿ªÆô
+// æ‘©æ“¦è½®å¼€å¯
 bool_t fricOn=0;
-//²¦µ¯ÂÖ¿ªÆô
+//æ‹¨å¼¹è½®å¼€å¯
 uint8_t triggerOn=0;
 
 extern volatile uint8_t  rc_online;
 extern volatile uint8_t data_ready;
 
-static struct TriggerControl_s triggerCtrl;
 static enum TriggerMode_e triggerMode;
 
 static int16_t giveShootCurrent[2];
@@ -101,9 +91,7 @@ static fp32 presentVShootMotor[2],presentVTriggerMotor;
 static pid_type_def shootMotorPIDs[2],triggerMotorPID;
 
 static void initShootPIDs(void);
-static void initTriggerECDRoundsMonitor(void);
 static void getInstruction(void);
-static void monitorTriggerECDRound(void);
 static void initShootModes(void);
 void static triggerModeChange(void);
 static void fricModeChange(void);
@@ -115,26 +103,25 @@ void shoot_task(void const *pvParameters)
 {
     osDelay(SHOOT_TASK_INIT_TIME);
 	
-    initShootPIDs();    //³õÊ¼»¯PID
-    initTriggerECDRoundsMonitor();  //³õÊ¼»¯²¦µ¯ÂÖÈ¦Êı¼à¿Ø
-    initShootModes();   //³õÊ¼»¯·¢Éä×´Ì¬
+    initShootPIDs();    //åˆå§‹åŒ–PID
+    initShootModes();   //åˆå§‹åŒ–å‘å°„çŠ¶æ€
 
-    rc_p = get_remote_control_point();    //»ñÈ¡Ò£¿ØÆ÷Êı¾İºÍNNXÊı¾İÖ¸Õë
+    rc_p = get_remote_control_point();    //è·å–é¥æ§å™¨æ•°æ®å’ŒNNXæ•°æ®æŒ‡é’ˆ
 	nx_p = get_nx_control_point();
 
     while(1)
     {
         getInstruction();
-		fricModeChange();           //Ä¦²ÁÂÖ×´Ì¬¸Ä±ä
+		
+		fricModeChange();           //æ‘©æ“¦è½®çŠ¶æ€æ”¹å˜
 
-        triggerModeChange();        //²¦µ¯ÂÖ×´Ì¬×ª±ä
+        triggerModeChange();        //æ‹¨å¼¹è½®çŠ¶æ€è½¬å˜
 		
         setSpeed();
-
-        monitorTriggerECDRound();        //¼à¿Ø²¦µ¯ÂÖECDÈ¦Êı
 		
         getShootMotorSpeed();
-        calcCurrent();                   //¼ÆËãPID
+		
+        calcCurrent();                   //è®¡ç®—PID
 
         CAN_cmd_shoot(giveShootCurrent[0], giveShootCurrent[1]);
 
@@ -150,244 +137,129 @@ static void initShootPIDs(void)
 	
     PID_init(&triggerMotorPID,PID_POSITION,trigger_motor_speed_pid,M2006_MOTOR_SPEED_PID_MAX_OUT,M2006_MOTOR_SPEED_PID_MAX_IOUT);
 }
-
-/**
- * @brief ½«ECD²îÖµµÈ»¯Îª(0,8191)·¶Î§
- * 
- * @param rawECD 
- * @return uint16_t 
- */
-static uint16_t ECDFormat(int16_t rawECD)     //test done
-{
-    while(rawECD<0)
-        rawECD+=ECD_FULL_ROUND;
-    while(rawECD>=ECD_FULL_ROUND)
-        rawECD-=ECD_FULL_ROUND;
-    return (uint16_t)rawECD;
-}
-
-static void initTriggerECDRoundsMonitor(void)  //³õÊ¼»¯²¦µ¯ÂÖÈ¦Êı¼à¿Ø
-{
-    triggerCtrl.ECDPoint=&(get_trigger_motor_measure_point()->ecd);
-    triggerCtrl.initECD=*(triggerCtrl.ECDPoint);
-	
-	triggerCtrl.nowRounds = 0;
-	triggerCtrl.mstack.head = 0;
-	triggerCtrl.mstack.stack[0] = 0;
-}
-
-//Ìí¼ÓNX¿ØÖÆ·¢Éä
+uint8_t fire_t;
+//æ·»åŠ NXæ§åˆ¶å‘å°„
 static void getInstruction(void)
 {
-    if(robotIsAuto())//×Ô¶¯Ä£Ê½
+	trigger_state=rc_p->rc.s[1];//æ‹¨æ†ï¼Œæ‘©æ“¦è½®
+	wheel		 =rc_p->rc.ch[4];
+	//æ‹¨è½®å¤§äºæŸå€¼è¿å‘ï¼Œå°äºæŸå€¼å•å‘
+	//å·¦æ‹¨æ† ä¸Šï¼šå¼€æ‘©æ“¦è½® ä¸­ï¼šå…³ ä¸‹ï¼šnxæ¥ç®¡ï¼Œå¹¶ä¸”æ”¹å˜æ€»çŠ¶æ€æœºä»¥æ”¹å˜robotauto
+	if(robotIsAuto())//è‡ªåŠ¨æ¨¡å¼
 	{
-		if((nx_p->mode == 2) && data_ready)
+		if(fire_t == 1)
 		{
 			triggerMode = TriggerMode_e_ShootOne;
+			fire_t = 0;//å‡Œæ™¨å†™çš„é€»è¾‘ï¼Œæˆ‘è§‰å¾—æœ‰é—®é¢˜
 		}
-		return;
 	}
-	else
+}
+
+//æ‘©æ“¦è½®çŠ¶æ€æœº
+static void fricModeChange(void)
+{
+	fricOn=0;
+	if(trigger_state==1 || rc_p->mouse.press_r==1)//å¼€
 	{
-		trigger_state=rc_p->rc.s[1];//²¦¸Ë£¬Ä¦²ÁÂÖ
-		wheel		 =rc_p->rc.ch[4];
-		//²¦ÂÖ´óÓÚÄ³ÖµÁ¬·¢£¬Ğ¡ÓÚÄ³Öµµ¥·¢
-		//×ó²¦¸Ë ÉÏ£º¿ªÄ¦²ÁÂÖ ÖĞ£º¹Ø ÏÂ£ºnuc½Ó¹Ü£¬²¢ÇÒ¸Ä±ä×Ü×´Ì¬»úÒÔ¸Ä±ärobotauto
-		
+		fricOn=1;
+	}
+	else if(trigger_state==3)//å…³
+	{
+		fricOn=0;
+	}
+	else if(trigger_state==2)//è‡ªåŠ¨
+	{
+		fricOn=1;//è¿›è‡ªåŠ¨æ¨¡å¼å…¨ç¨‹å¼€æ‘©æ“¦è½®
 	}
 }
 
-/**
- * @brief ¼à¿Ø²¦µ¯ÂÖµç»úECD²¢¸üĞÂÈ¦Êı¼ÆÊı
- * Ê¹ÓÃÀï³Ì±®Õ»·¨¼ì²âµç»ú×ª¶¯µÄÍêÕûÈ¦Êı
- * ½«Ò»È¦8192¸öECDÖµ»®·ÖÎªMILESTONE_NUMBER¸öÇøÓò£¨Àï³Ì±®£©
- * Í¨¹ı¼ì²âÀï³Ì±®³öÏÖµÄË³ĞòºÍÄ£Ê½À´ÅĞ¶ÏÊÇ·ñÍê³ÉÒ»È¦
- */
-static void monitorTriggerECDRound(void)
-{
-    uint8_t j;
-    // »ñÈ¡µ±Ç°µç»úµÄECDÖµ£¨0-8191£©
-    triggerCtrl.nowECD = *(triggerCtrl.ECDPoint);
-
-    // ±éÀúËùÓĞÀï³Ì±®ÇøÓò£¬¼ì²éµ±Ç°ECDÊÇ·ñÔÚÄ³¸öÀï³Ì±®¸½½ü
-    for(j = 0; j < MILESTONE_NUMBER; j++)
-    {
-        // ¼ÆËãÏà¶ÔÓÚ³õÊ¼Î»ÖÃµÄECDÖµ£¨´¦ÀíÒç³ö£©
-        fp32 relativeRealECD = ECDFormat((int16_t)triggerCtrl.nowECD - (int16_t)triggerCtrl.initECD);
-        
-        // ¼ÆËãµ±Ç°ECDÓëµÚj¸öÀï³Ì±®ÀíÂÛÎ»ÖÃµÄ¾àÀë
-        // µÚj¸öÀï³Ì±®µÄÀíÂÛÎ»ÖÃ = j * ECD_FULL_ROUND / MILESTONE_NUMBER
-        fp32 distance_to_milestone;
-        int32_t raw_distance = (int32_t)relativeRealECD - (j * ECD_FULL_ROUND / MILESTONE_NUMBER);
-        
-        // ´¦Àí¾àÀëµÄÄ£ÔËËã£¬ÕÒµ½×î¶Ì¾àÀë£¨¿¼ÂÇECDÑ­»·ÌØĞÔ£©
-        if (raw_distance > ECD_FULL_ROUND/2) {
-            distance_to_milestone = ECDFormat((int16_t)(raw_distance - ECD_FULL_ROUND));
-        } else if (raw_distance < -ECD_FULL_ROUND/2) {
-            distance_to_milestone = ECDFormat((int16_t)(raw_distance + ECD_FULL_ROUND));
-        } else {
-            distance_to_milestone = ECDFormat((int16_t)raw_distance);
-        }
-        
-        // ¼ì²éÊÇ·ñ½Ó½üÀï³Ì±®£¨ÔÚãĞÖµ·¶Î§ÄÚ£©
-        if (distance_to_milestone < MILESTONE_NEAR_THRESHHOLD || 
-            (ECD_FULL_ROUND - distance_to_milestone) < MILESTONE_NEAR_THRESHHOLD)
-        {
-            // µ±Ç°Î»ÖÃÂäÔÚÀï³Ì±®jµÄÇøÓòÄÚ
-            if (j != triggerCtrl.mstack.stack[triggerCtrl.mstack.head])
-            {
-                // µ½´ïÒ»¸öĞÂµÄÀï³Ì±®£¬½«ÆäÑ¹ÈëÕ»ÖĞ
-                if (triggerCtrl.mstack.head < MILESTONE_NUMBER)
-                {
-                    triggerCtrl.mstack.head++;
-                    triggerCtrl.mstack.stack[triggerCtrl.mstack.head] = j;
-                }
-                else
-                {
-                    // Õ»Âú´¦Àí£¨ÕâÖÖÇé¿öÀíÂÛÉÏ²»Ó¦¸Ã·¢Éú£©
-                    // Çå¿ÕÕ»´ÓÍ·¿ªÊ¼
-                    triggerCtrl.mstack.head = 0;
-                    triggerCtrl.mstack.stack[0] = j;
-                }
-            }
-            // ÕÒµ½Ò»¸öÀï³Ì±®¾Í¿ÉÒÔÍË³öÑ­»·ÁË
-            break;
-        }
-    }
-    
-    // ¼ì²éÕ»ÖĞÊÇ·ñÓĞ×ã¹»µÄÔªËØÀ´½øĞĞÄ£Ê½Æ¥Åä
-    if (triggerCtrl.mstack.head >= 3)
-    {
-        // Ä£Ê½1£º¼ì²éÊÇ·ñ³öÏÖ0->1->2->0»ò1->2->0->1»ò2->0->1->2µÈÕıÏòÄ£Ê½
-        // ¶ÔÓÚMILESTONE_NUMBER=3µÄÇé¿ö£¬¼ì²âÈı¸öÁ¬ĞøµÄµİÔöĞòÁĞ£¨Ä£3£©
-        int8_t diff1 = (triggerCtrl.mstack.stack[triggerCtrl.mstack.head] - 
-                       triggerCtrl.mstack.stack[triggerCtrl.mstack.head-1] + MILESTONE_NUMBER) % MILESTONE_NUMBER;
-        int8_t diff2 = (triggerCtrl.mstack.stack[triggerCtrl.mstack.head-1] - 
-                       triggerCtrl.mstack.stack[triggerCtrl.mstack.head-2] + MILESTONE_NUMBER) % MILESTONE_NUMBER;
-        int8_t diff3 = (triggerCtrl.mstack.stack[triggerCtrl.mstack.head-2] - 
-                       triggerCtrl.mstack.stack[triggerCtrl.mstack.head-3] + MILESTONE_NUMBER) % MILESTONE_NUMBER;
-        
-        // ÕıÏòĞı×ª£ºÈı¸ö²îÖµ¶¼Ó¦Îª1£¨Ä£3£©
-        if (diff1 == 1 && diff2 == 1 && diff3 == 1)
-        {
-            triggerCtrl.nowRounds += 1;  // Íê³ÉÕıÏòÒ»È¦
-            // µ¯³öÇ°Èı¸öÔªËØ£¬±£Áô×îºóÒ»¸ö×÷ÎªÏÂÒ»È¦µÄÆğµã
-            triggerCtrl.mstack.stack[0] = triggerCtrl.mstack.stack[triggerCtrl.mstack.head];
-            triggerCtrl.mstack.head = 0;
-        }
-        // ·´ÏòĞı×ª£ºÈı¸ö²îÖµ¶¼Ó¦Îª2£¨¼´-1Ä£3£©
-        else if (diff1 == MILESTONE_NUMBER-1 && diff2 == MILESTONE_NUMBER-1 && diff3 == MILESTONE_NUMBER-1)
-        {
-            triggerCtrl.nowRounds -= 1;  // Íê³É·´ÏòÒ»È¦
-            // µ¯³öÇ°Èı¸öÔªËØ£¬±£Áô×îºóÒ»¸ö×÷ÎªÏÂÒ»È¦µÄÆğµã
-            triggerCtrl.mstack.stack[0] = triggerCtrl.mstack.stack[triggerCtrl.mstack.head];
-            triggerCtrl.mstack.head = 0;
-        }
-    }
-}
-
-static void initShootModes(void)
-{
-    //³õÊ¼»¯Ö¸Áî
-    fricOn=0;
-    triggerOn=0;
-	triggerMode=TriggerMode_e_Stop;
-}
-
-
-
-//²¦µ¯ÂÖ×´Ì¬»ú
+//æ‹¨å¼¹è½®çŠ¶æ€æœº
 void static triggerModeChange(void)
 {
-    static uint8_t lastmode = TriggerMode_e_Stop;
-    static uint8_t nowTimeRoundThreshold = TRIGGER_ROUNDS_FOR_A_BULLET_A;
-    
-	static uint8_t shootOneLatched = 0;
-    // Ä¦²ÁÂÖ¹Ø±Õ×´Ì¬£¬Ê¼ÖÕÈÃ²¦µ¯ÂÖ¹Ø±Õ
+    static uint8_t shootOneLatched = 0;
+	static uint8_t lastmode = TriggerMode_e_Stop;
+    static TickType_t currentTick = 0;
     if(!fricOn) 
     {
         triggerMode = TriggerMode_e_Stop;
-//        return;
+        return;
     }
-    
-    // ¼ÇÂ¼ÉÏ´Î×´Ì¬ÓÃÓÚ×´Ì¬±ä»¯¼ì²â
+	
+    currentTick = xTaskGetTickCount();
+	
     if(lastmode != triggerMode)
     {
         lastmode = triggerMode;
+		// è¿›å…¥å•å‘æ¨¡å¼æ—¶è®°å½•å¼€å§‹æ—¶é—´
+        if(triggerMode == TriggerMode_e_ShootOne)
+        {
+            shootOneStartTime = currentTick;
+        }
     }
+    
     switch(triggerMode)
     {
         case TriggerMode_e_Stop:
-			// Êó±ê¿ØÖÆ·¢Éä
-			if (rc_p->mouse.press_l == 1)
-			{
-				triggerMode = TriggerMode_e_ShootMulti;
-			}
-            // Í£Ö¹×´Ì¬ÏÂ£¬¿ÉÒÔ¸ù¾İÒ¡¸ËÎ»ÖÃ½øÈëµ¥·¢»òÁ¬·¢
-            if(wheel >= 50 && wheel <= 400)
-			{
-				if(!shootOneLatched)
-				{
-					triggerMode = TriggerMode_e_ShootOne;
-					shootOneLatched = 1;
-					nowTimeRoundThreshold = TRIGGER_ROUNDS_FOR_A_BULLET_A;
-				}
-			}
-            else if(wheel > 400)  // Ò¡¸ËÔÚÁ¬·¢Çø¼ä
+            // é¼ æ ‡æ§åˆ¶å‘å°„
+            if (rc_p->mouse.press_l == 1)
             {
                 triggerMode = TriggerMode_e_ShootMulti;
             }
-			else if(wheel < -50)
-			{
-				triggerMode = TriggerMode_e_StuckSolve;
-			}
-			else
-			{
-				shootOneLatched = 0; // ÍË»ØËÀÇø²ÅÔÊĞíÏÂÒ»´Îµ¥·¢
-			}
-            // Ò¡¸ËÔÚËÀÇø»òĞ¡ÓÚ50£¬±£³ÖÍ£Ö¹×´Ì¬
+            if((robotIsAuto() == 1))
+            {
+                if(nx_p->fire == 1)
+                {
+                    triggerMode = TriggerMode_e_ShootOne;
+                }
+            }
+            else //æ‰‹åŠ¨æ¨¡å¼æ‰‹æŸ„
+            {
+                if(wheel >= 50 && wheel <= 400)
+                {
+                    if(!shootOneLatched)
+                    {
+                        triggerMode = TriggerMode_e_ShootOne;
+                        shootOneLatched = 1;
+                    }
+                }
+                else if(wheel > 400)  // æ‘‡æ†åœ¨è¿å‘åŒºé—´
+                {
+                    triggerMode = TriggerMode_e_ShootMulti;
+                }
+                else if(wheel < -50)
+                {
+                    triggerMode = TriggerMode_e_StuckSolve;
+                }
+                else
+                {
+                    shootOneLatched = 0; // é€€å›æ­»åŒºæ‰å…è®¸ä¸‹ä¸€æ¬¡å•å‘
+                }
+            }
             break;
             
         case TriggerMode_e_ShootOne:
-            // µ¥·¢×´Ì¬ÏÂ£¬±ØĞëµÈ´ıµ¥·¢Íê³É²ÅÄÜÇĞ»»×´Ì¬
-            // ¼ì²éÊÇ·ñ´ïµ½Ô¤¶¨È¦Êı£¨Õı×ª»ò·´×ª4È¦£©
-
-			//JYH£ºÃ»ÓĞshootonelatch±êÖ¾Î»»á·´¸´½øÈëµ¥·¢×´Ì¬µ¼ÖÂÎ±Á¬·¢
-            if(triggerCtrl.nowRounds <= (-nowTimeRoundThreshold) || 
-               triggerCtrl.nowRounds >= nowTimeRoundThreshold)
+            if((currentTick - shootOneStartTime) >= SHOOT_ONE_DURATION_TICKS)
             {
-                // µ¥·¢Íê³É£¬ÇĞ»»»ØÍ£Ö¹×´Ì¬
                 triggerMode = TriggerMode_e_Stop;
-                triggerCtrl.nowRounds = 0;  // ÖØÖÃÈ¦Êı
-                triggerCtrl.mstack.head = 0;
-				triggerCtrl.mstack.stack[0] = 0;
-                // ÂÖ»»È¦ÊıãĞÖµ£¬±ÜÃâ»úĞµ¹²Õñ
-                if(nowTimeRoundThreshold == TRIGGER_ROUNDS_FOR_A_BULLET_A)
-                    nowTimeRoundThreshold = TRIGGER_ROUNDS_FOR_A_BULLET_B;
-                else if(nowTimeRoundThreshold == TRIGGER_ROUNDS_FOR_A_BULLET_B)
-                    nowTimeRoundThreshold = TRIGGER_ROUNDS_FOR_A_BULLET_C;
-                else if(nowTimeRoundThreshold == TRIGGER_ROUNDS_FOR_A_BULLET_C)
-                    nowTimeRoundThreshold = TRIGGER_ROUNDS_FOR_A_BULLET_A;
             }
-            // ·ñÔò±£³Öµ¥·¢×´Ì¬£¨ºöÂÔÒ¡¸Ë±ä»¯£©
             break;
             
         case TriggerMode_e_ShootMulti:
-            // Á¬·¢×´Ì¬ÏÂ£¬Ò¡¸ËÀë¿ªÁ¬·¢Çø¼ä¾ÍÍ£Ö¹
-            if(wheel <= 400)  // Ò¡¸ËÀë¿ªÁ¬·¢Çø¼ä
+            // è¿å‘çŠ¶æ€ä¸‹ï¼Œæ‘‡æ†ç¦»å¼€è¿å‘åŒºé—´å°±åœæ­¢
+            if(wheel <= 400)  // æ‘‡æ†ç¦»å¼€è¿å‘åŒºé—´
             {
                 triggerMode = TriggerMode_e_Stop;
             }
-            // ·ñÔò±£³ÖÁ¬·¢×´Ì¬
+            // å¦åˆ™ä¿æŒè¿å‘çŠ¶æ€
             break;
             
         case TriggerMode_e_StuckSolve:
-            // ¿¨µ¯½â¾ö×´Ì¬
+            // å¡å¼¹è§£å†³çŠ¶æ€
             if(wheel>=-50)
 			{
 				triggerMode = TriggerMode_e_Stop;
 			}
-            // ½â¾öÍê³Éºó»Øµ½Í£Ö¹×´Ì¬
+            // è§£å†³å®Œæˆåå›åˆ°åœæ­¢çŠ¶æ€
             break;
             
         default:
@@ -396,27 +268,15 @@ void static triggerModeChange(void)
     }
 }
 
-//Ä¦²ÁÂÖ×´Ì¬»ú
-static void fricModeChange(void)
+static void initShootModes(void)
 {
-	fricOn=0;
-	if(trigger_state==1 || rc_p->mouse.press_r==1)//¿ª
-	{
-		fricOn=1;
-	}
-	else if(trigger_state==3)//¹Ø
-	{
-		fricOn=0;
-	}
-	else if(trigger_state==2 || robotIsAuto())//×Ô¶¯
-	{
-		fricOn=1;//½ø×Ô¶¯Ä£Ê½È«³Ì¿ªÄ¦²ÁÂÖ
-	}
+    //åˆå§‹åŒ–æŒ‡ä»¤
+    fricOn=0;
+    triggerOn=0;
+	triggerMode=TriggerMode_e_Stop;
 }
 
-
-
-//ËÙ¶ÈÉèÖÃ
+//é€Ÿåº¦è®¾ç½®
 void setSpeed(void)
 {
 	if(fricOn)
