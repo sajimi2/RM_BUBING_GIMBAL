@@ -59,8 +59,8 @@ typedef __PACKED_STRUCT
 {
         __PACKED_STRUCT
         {
-                int16_t ch[5];
-                char s[2];
+                int16_t ch[5];//遥杆通道
+                char s[2];    //拨杆通道
         } rc;
         __PACKED_STRUCT
         {

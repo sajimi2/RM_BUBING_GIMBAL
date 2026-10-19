@@ -4,7 +4,7 @@
 #include "struct_typedef.h"
 
 // 上位机 -> MCU
-typedef struct __attribute__((packed))
+typedef struct __attribute__((packed))//后缀是GCC扩展，表示结构体成员紧密排列
 {
     uint8_t mode;    // 0: 不控制, 1: 控制云台但不开火，2: 控制云台且开火
     int16_t yaw;

@@ -1,5 +1,4 @@
 #include "usart6_debug.h"
-#include "vofa_debug.h"
 
 extern UART_HandleTypeDef huart6;
 
@@ -15,26 +14,16 @@ void USART6_Debug_Init(void)
 // 基础字符串发送
 void USART6_SendString(const char *str)
 {
-    /* 3-pin 接口用于 VOFA 时禁用文本，避免破坏 JustFloat 帧。 */
-#if VOFA_UART_INDEX == 6
-    (void)str;
-#else
     if(str == NULL) return;
     uint16_t len = strlen(str);
     HAL_UART_Transmit(&huart6, (uint8_t*)str, len, HAL_MAX_DELAY);
-#endif
 }
 
 // 发送原始数据
 void USART6_SendData(uint8_t *data, uint16_t len)
 {
-#if VOFA_UART_INDEX == 6
-    (void)data;
-    (void)len;
-#else
     if(data == NULL || len == 0) return;
     HAL_UART_Transmit(&huart6, data, len, HAL_MAX_DELAY);
-#endif
 }
 
 // 十六进制格式发送数据；“数据: ”前缀保留原有的 GBK 发送字节
@@ -73,8 +62,6 @@ void USART6_Printf(const char *format, ...)
 // 重定向 printf（可选配置）
 PUTCHAR_PROTOTYPE
 {
-#if VOFA_UART_INDEX != 6
     HAL_UART_Transmit(&huart6, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
-#endif
     return ch;
 }

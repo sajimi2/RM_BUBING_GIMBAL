@@ -9,7 +9,6 @@ set(FIRMWARE_SOURCES
     Task/NX_communicate.c
     Task/Reset_task.c
     Debug/usart6_debug.c
-    Debug/vofa_debug.c
     Control/pid.c
     Control/controller.c
     Applications/CAN_recieve_send.c

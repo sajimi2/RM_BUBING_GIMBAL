@@ -32,8 +32,11 @@
 
 // 速度环PID参数
 #define PITCH_SPD_KP 4000000.0f
-#define PITCH_SPD_KI 000.0f
+/* 以 2 ms 为基准的小幅积分，Ti 约 1 s；仅补 Pitch 持续的速度偏差。 */
+#define PITCH_SPD_KI 8000.0f
 #define PITCH_SPD_KD 1000.0f
+/* 启动延时或调试暂停后不补算长时间积分，正常抖动按实际经过时间折算。 */
+#define PITCH_I_MAX_DT_MS 10U
 
 #define YAW_SPD_KP 10000000.0f
 #define YAW_SPD_KI 0	
@@ -514,6 +517,34 @@ void getControlAngles(void)
     lastMode = *robotMode;
 }
 
+/* 仅供 Pitch 速度环使用，保留原 P/D 与速度死区；不改变其他轴的 PID_calc。
+ * Ki 沿用每 2 ms 一次的参数单位，按控制环时间缩放，与视觉收包次数无关。
+ * 输出饱和时拒绝继续加深饱和的积分，允许反向误差消退已有积分。
+ */
+static void pitch_speed_pid_calc(void)
+{
+    pid_type_def *pid = &PitchCtrl.spd_pid;
+    const fp32 previous_i = pid->Iout;
+    const fp32 nominal_ki = pid->Ki;
+    const uint32_t dt_ms = PitchCtrl.nowTime - PitchCtrl.lastTime;
+
+    pid->Ki = (dt_ms > 0U && dt_ms <= PITCH_I_MAX_DT_MS)
+                  ? nominal_ki * (fp32)dt_ms / GIMBAL_TASK_CTRL_TIME
+                  : 0.0f;
+    PID_calc(pid, PitchCtrl.radspeed, PitchCtrl.agl_pid.out);
+    pid->Ki = nominal_ki;
+
+    const fp32 unclamped_out = pid->Pout + pid->Iout + pid->Dout;
+    const fp32 integral_step = pid->Iout - previous_i;
+    if ((unclamped_out > pid->max_out && integral_step > 0.0f) ||
+        (unclamped_out < -pid->max_out && integral_step < 0.0f))
+    {
+        pid->Iout = previous_i;
+        pid->out = pid->Pout + pid->Iout + pid->Dout;
+        range_limit_inside(pid->out, pid->max_out);
+    }
+}
+
 /**
  * @brief PID计算函数（包含位置环和速度环）
  */
@@ -541,17 +572,20 @@ void unitPID_calc(void)
         YawCtrl.Volt_out = 0;
     }
 
+    /* 无力或遥控掉线时不积累 Pitch 积分，避免恢复使能后带入停机误差。 */
+    if (PitchCtrl.nopowerflag || rc_online == 0)
+    {
+        PID_clear(&(PitchCtrl.spd_pid));
+        PID_clear(&(PitchCtrl.agl_pid));
+        PitchCtrl.Volt_out = 0;
+        return;
+    }
+
     // Pitch轴位置环PID计算
     gimbal_PID_calc(&(PitchCtrl.agl_pid), PitchCtrl.nowAbsoluteAngle, PitchCtrl.want_AbsoluteAngleCtrl);
     // Pitch轴速度环PID计算
-    PID_calc(&(PitchCtrl.spd_pid), PitchCtrl.radspeed, PitchCtrl.agl_pid.out);
+    pitch_speed_pid_calc();
     PitchCtrl.Volt_out = -PitchCtrl.spd_pid.out;//changedv2
-
-    // Pitch轴无力标志检查
-    if (PitchCtrl.nopowerflag)
-    {
-        PitchCtrl.Volt_out = 0;
-    }
 }
 
 /**
@@ -591,15 +625,4 @@ fp32 get_pitch_current_angle(void)
 fp32 get_pitch_current_speed(void)
 {
     return PitchCtrl.radspeed * 1000.0f; // 转换为弧度/秒
-}
-
-/* 只读观测，不参与目标更新和 PID 计算。 */
-fp32 get_yaw_target_angle(void)
-{
-    return YawCtrl.want_AbsoluteAngleCtrl;
-}
-
-fp32 get_pitch_target_angle(void)
-{
-    return PitchCtrl.want_AbsoluteAngleCtrl;
 }

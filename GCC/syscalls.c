@@ -6,7 +6,6 @@
 #include "usart.h"
 #include "FreeRTOS.h"
 #include "task.h"
-#include "vofa_debug.h"
 
 extern char __HeapBase, __HeapLimit;
 
@@ -43,8 +42,6 @@ int _write(int file, char *data, int length)
 {
     if (file != 1 && file != 2) { errno = EBADF; return -1; }
     if (length < 0) { errno = EINVAL; return -1; }
-    /* USART6 被 VOFA 独占时，拒绝混入 printf 文本；不等待正在运行的 DMA。 */
-    if (VOFA_UART_INDEX == 6) { errno = EBUSY; return -1; }
     if (huart6.gState == HAL_UART_STATE_RESET) { errno = EIO; return -1; }
     int sent = 0;
     while (sent < length)

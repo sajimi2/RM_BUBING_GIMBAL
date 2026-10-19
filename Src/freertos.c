@@ -33,7 +33,6 @@
 #include "shoot_task.h"
 #include "NX_communicate.h"
 #include "Reset_task.h"
-#include "vofa_debug.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -159,7 +158,6 @@ void MX_FREERTOS_Init(void) {
   
   osThreadDef(reset, reset_task, osPriorityNormal, 0, 128);
   resetTaskHandle = osThreadCreate(osThread(reset), NULL);
-  VOFA_Debug_Start();
   /* USER CODE END RTOS_THREADS */
 
 }

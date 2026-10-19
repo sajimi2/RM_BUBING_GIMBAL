@@ -37,7 +37,24 @@ DSP 改为随工程保存的 CMSIS 5.7.0 / DSP 1.7.0 源文件，其 `arm_math.h
 日常构建无需联网、Keil 或 CMSIS Pack；源清单在 `cmake/sources.cmake`。
 主栈与 C 库堆各 8 KB，RTOS 堆保持 24 KB，DMA 数据使用普通 SRAM。
 
+## Pitch 静态偏差修正（待上板验证）
+
+仅在 Pitch 速度环启用小幅积分：`PITCH_SPD_KI=8000`（每 2 ms 的基准系数，
+对应当前 `Kp=4000000` 的积分时间约 1 s），沿用积分限幅 ±3000 和总输出限幅 ±30000。
+积分按实际控制间隔折算；0 ms 或超过 10 ms 的间隔不补算积分。
+输出饱和时停止继续加深饱和的积分；无力或遥控掉线时清空 Pitch 双环状态并输出零。
+正常保持时保留已建立的积分，用于抵消持续负载。Yaw、视觉目标算法和 Pitch 原 P/D 参数不变。
+这是针对静止目标附近卡住的初始调试参数，不能代替实机验证；本次仅构建，不自动烧录。
+宿主验证：`rtk proxy python -X utf8 tests/host/test_pitch_integral.py`，覆盖积分时基、限幅、
+饱和回退、停机/重新使能、tick 回绕和 Yaw 原输出一致性；不证明实际机械系统的稳定性。
+
 ## VOFA 观测：C 板 3-pin 接口
+
+当前本地版本已完全撤下 VOFA 接入：CMake 和 Keil 均不编译 `vofa_debug.c`，
+任务启动、CAN 观测计时、只读观测接口及串口文本屏蔽均已移除；原有串口/DMA/中断配置与接入 VOFA 前一致。
+因此固件没有 VOFA 任务、缓冲区、临界区、DMA 传输或遥测中断开销，视觉目标叠加错误的修正仍保留。
+正常构建烧录后不会输出 VOFA 数据。失去观测接口依赖的旧源码和对应宿主测试已从工作区移除，
+完整版本保存在已推送的提交 `9d54ef6` 中。如需恢复完整接入，应以该提交为准。下文仅说明该启用遥测版本。
 
 官方 C 板的 **3-pin 接口对应 USART6：TX=PG14，RX=PG9**；
 4-pin 接口对应 USART1：TX=PA9，RX=PB7。以实际针数和引脚为准，勿混淆板上丝印编号与 MCU 外设编号。
@@ -93,8 +110,8 @@ USART6 用于 VOFA 时，原 `USART6_SendString/Data`、字符输出和 GCC `pri
 
 视觉控制只修正了目标基准：`新目标 = 当前实测角度 + (视觉角度 - 当前实测角度)`，
 不再叠加旧目标。原有符号、换算、限幅、PID 参数及模式判定保留。
-Debug/Release 构建和宿主遥测测试已通过；真实收波形、任务耗时、电机运行仍需上板验证，本次未烧录。
-宿主测试：`rtk proxy python -X utf8 tests/host/test_vofa.py`（需要宿主 GCC，或设置 `HOST_CC`）。
+启用遥测版本的 Debug/Release 构建和宿主测试曾通过；这些结果不证明真实控制不受遥测影响。
+该历史版本的宿主测试命令为 `rtk proxy python -X utf8 tests/host/test_vofa.py`（需要宿主 GCC，或设置 `HOST_CC`）；当前禁用版不再包含该测试。
 
 ## 原 Keil 构建环境
 

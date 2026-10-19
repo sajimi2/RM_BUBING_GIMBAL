@@ -71,6 +71,7 @@ static uint8_t sbus_rx_buf[2][SBUS_RX_BUF_NUM];
 void remote_control_init(void)
 {
     RC_Init(sbus_rx_buf[0], sbus_rx_buf[1], SBUS_RX_BUF_NUM);
+    //给遥控器的两个缓冲区
 }
 /**
   * @brief          get remote control data point
@@ -82,9 +83,9 @@ void remote_control_init(void)
   * @param[in]      none
   * @retval         遥控器数据指针
   */
-const RC_ctrl_t *get_remote_control_point(void)
+const RC_ctrl_t *get_remote_control_point(void)//调用者只能读取
 {
-    return &rc_ctrl;
+    return &rc_ctrl;//返回的是遥控的地址，确保读到最新
 }
 
 //判断遥控器数据是否出错，
