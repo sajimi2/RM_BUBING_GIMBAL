@@ -439,6 +439,8 @@ void getControlAngles(void)
         YawCtrl.nopowerflag = 1; // 1表示无力，电机输出为零
         PitchCtrl.nopowerflag = 1;
 
+        // 无力期间也要记录模式，否则恢复上电时不会把目标重置到当前位置，云台会跳回停机前的目标
+        lastMode = *robotMode;
         return;
     }
 
