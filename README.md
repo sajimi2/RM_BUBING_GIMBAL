@@ -1,55 +1,59 @@
 # BubinGimbalV1.0
-can总线下发未优化
 
-## 构建环境
+步兵云台 C 板固件，STM32F407IGHx + FreeRTOS。车上烧录的基线及其来源见 `BASELINE.md`。
 
-这是 STM32F407IGHx 的 Keil µVision 工程，入口为
-`MDK-ARM/standard_robot.uvprojx`，目标名为 `standard_robot`。
-工程使用 ARM Compiler 5.06 update 7（build 960），依赖
-`Keil.STM32F4xx_DFP.3.1.1` 和 `ARM.CMSIS.4.5.0`（提供 CMSIS CORE 4.3.0）。
+## 构建与烧录（VS Code + CMake）
 
-本机 µVision 路径：`D:\STM32 Related\keil5\UV4\UV4.exe`。
-换电脑后，可修改 `tools/keil.ps1` 的默认路径，或传入 `-Uv4Path`。
+日常使用 VS Code + STM32CubeMX + CMake。需要：
 
-## 在 VS Code 中构建和烧录
+- ARM GCC（`arm-none-eabi-gcc`）：在 PATH 中，或用环境变量 `ARM_GCC_PATH` 指向它的 `bin` 目录；
+- CMake 3.21 及以上、Ninja；
+- 烧录还需要 STM32CubeProgrammer 和 ST-Link（SWD）。
 
-本机 `.vscode/tasks.json` 已配置以下任务：
-
-- **Ctrl+Shift+B**：执行 `Keil: 构建`。
-- **终端 → 运行任务 → Keil: 全部重建**：重新编译全部源文件并链接。
-- **终端 → 运行任务 → Keil: 构建并烧录**：先构建，成功后使用 Keil 的下载配置写入板子。
-
-任务通过 `rtk` 调用 `tools/keil.ps1`，需要 `rtk` 在 PATH 中。
-构建日志在 `.vscode/keil-build.log`，下载日志在 `.vscode/keil-flash.log`。
-原仓库忽略 `.vscode/`，这些任务属于本机配置；其他电脑也可以直接执行：
+`CMakePresets.json` 提供 `Debug`、`Release` 两个预设，以及构建后直接烧录的 `Flash-Debug`、`Flash-Release`：
 
 ```powershell
-rtk proxy powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\keil.ps1 -Action Rebuild
-rtk proxy powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\keil.ps1 -Action Flash
+cmake --preset Debug
+cmake --build --preset Debug          # 只构建
+cmake --build --preset Flash-Debug    # 构建成功后烧录：写入、校验、复位
 ```
 
-第二条命令会实际烧录。构建产生：
+也可以用脚本：`tools/cmake.ps1 -Action Build|Rebuild|Flash|CheckFlash -Preset Debug|Release`，
+其中 `CheckFlash` 只检查烧录命令，不连接板子。
 
-- `MDK-ARM/standard_robot/standard_robot.axf`：带调试信息的固件。
-- `MDK-ARM/standard_robot/standard_robot.hex`：可供下载器烧录的固件。
+产物在 `build/<预设>/`：`standard_robot.elf`（带调试符号）、`.hex`、`.bin`（基址 `0x08000000`）、`.map`。
 
-VS Code 左侧“运行和调试”目前没有对应的嵌入式调试配置。
-本工程没有 `CMakeLists.txt`，请使用以上 Keil 任务；断点调试可在 Keil 中进行。
+烧录由 `tools/flash.ps1` 调用 `STM32_Programmer_CLI`，按以下顺序查找：环境变量 `STM32_PROGRAMMER_CLI`、
+PATH、STM32Cube 扩展的 bundle 目录、默认安装目录。接了多个 ST-Link 时，用 `STM32_STLINK_SERIAL` 指定序列号。
+`flash` 目标只在 Windows 上生成。
 
-## 在 Keil 中操作
+源文件清单在 `cmake/sources.cmake`，需要手动维护。`standard_robot.ioc` 的目标工具链仍是 MDK-ARM V5，
+用 CubeMX 重新生成代码只会更新 Keil 工程和 `Src/`、`Inc/` 里的生成代码；如果增删了源文件，要同步到这个清单。
 
-1. 用 µVision 打开 `MDK-ARM/standard_robot.uvprojx`，选择 `standard_robot` 目标。
-2. 使用 **Project → Rebuild all target files** 完整构建，确认输出为 `0 Error(s)`。
-3. 当前工程配置为 ST-Link。首次下载前，在 **Options for Target → Debug → Settings**
-   中选择实际连接的 ST-Link，确认使用 SWD（界面中的 SW）端口。
-4. 在 **Flash Download** 中确认算法为 `STM32F4xx 1MB Flash`，起始地址为
-   `0x08000000`；然后使用 **Flash → Download** 烧录。
-5. 需要断点、观察变量时，使用 **Debug → Start/Stop Debug Session**。
+在 Linux 上编译时注意：`Src/main.c` 包含的是 `can_recieve_send.h`，实际文件名是 `CAN_recieve_send.h`，
+大小写不同会找不到头文件。Windows 不区分大小写，不受影响。
 
-构建仅验证编译和链接；下载需要板子供电及下载器正确连接。
-当前源码是视觉绝对角目标版本，视觉端须同步使用与板端 INS 对应的绝对角约定。
+## Keil 工程（保留，不再日常使用）
 
-命令行参数依据：[Keil µVision Command Line](https://www.keil.com/support/man/docs/uv4/uv4_commandline.asp)。
+`MDK-ARM/standard_robot.uvprojx`，目标 `standard_robot`，ARM Compiler 5.06 update 7，已开启 C99。
+依赖 `Keil.STM32F4xx_DFP.3.1.1` 和 `ARM.CMSIS.4.5.0`。命令行构建和烧录见 `tools/keil.ps1`。
+
+## 总线与电机（以代码为准）
+
+| 总线 | 设备 | 标识符 |
+| --- | --- | --- |
+| CAN1 | Yaw 6020（ID 1）、Pitch 6020（ID 2）、拨弹 2006 | 控制 `0x1FF`；反馈 `0x205`、`0x206`、`0x207` |
+| CAN1 | 发给底盘 C 板的遥控与模式 | `0x003` |
+| CAN2 | 摩擦轮 3508 ×2 | 控制 `0x200`；反馈 `0x201`、`0x202` |
+| CAN2 | 视觉 → 云台：目标角、开火 | `0x005` |
+| CAN2 | 云台 → 视觉：四元数 | `0x006` |
+
+GM6020 使用 `0x1FF` 电压控制。手册给出的电压给定范围是 −25000～25000，
+代码里 Yaw、Pitch 的输出限幅目前是 ±30000。
+
+`ref/` 里的手册：DT7 遥控器、开发板 C 型、C620 电调、M3508 电机。GM6020 的数据取自
+《RoboMaster GM6020 直流无刷电机使用说明》v1.4（2023.10），未放入仓库。
+整车连线图 `ref/普步z..pdf` 是一两年前的版本，只作大致参考，与代码冲突时以代码为准。
 
 ## Pitch 积分与重力前馈（默认关闭）
 
