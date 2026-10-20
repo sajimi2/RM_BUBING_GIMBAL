@@ -48,6 +48,45 @@ DSP 改为随工程保存的 CMSIS 5.7.0 / DSP 1.7.0 源文件，其 `arm_math.h
 宿主验证：`rtk proxy python -X utf8 tests/host/test_pitch_integral.py`，覆盖积分时基、限幅、
 饱和回退、停机/重新使能、tick 回绕和 Yaw 原输出一致性；不证明实际机械系统的稳定性。
 
+## Pitch 重力前馈与限幅观测（待标定、待上板验证）
+
+修改前恢复点：`68a2e6a`，已推送到 `origin/baseline/before-absolute-change-20261016`。
+
+在 `Task/gimbal_task.c` 中按当前实测姿态计算
+`u_g = gain * cosf(PitchCtrl.nowAbsoluteAngle + offset_rad)`，手动、自瞄与静止保持共用。
+模型适用于转轴近似水平、重心位置固定的俯仰机构；偏移角需包含安装和重心方向的影响。
+**默认 `PITCH_GRAVITY_GAIN_DEFAULT=0`，尚未启用非零补偿。** 没有实测保持输出，不能把试探系数当作标定结果。
+
+调试器可修改全局 `pitch_gravity_config.gain` 与 `.offset_rad`，验证后把实测值写回同名默认宏。
+`gain` 单位为 GM6020 协议原始控制量，采用 PID 内部方向；最终 CAN 命令统一取反。
+按目前代码的角度注释，抬头对应 INS Pitch 减小，抗下垂可能需要负 gain，但必须实测核对方向。
+`offset_rad` 为弧度，允许范围 `[-PI, PI]`；不要把视觉目标、角度误差或未校准的编码器角度直接代入。
+
+前馈独立限幅 `PITCH_GRAVITY_MAX_OUT=3000`，变化速率上限为每秒 6000 原始单位，便于平滑接入和退出。
+这两个值是本版初始调试边界，不代表实测重力负载。调整 gain 为 0 时已有补偿平滑退回零；
+无力或遥控掉线时立即撤下补偿并清空 Pitch 双环，重新使能从零缓升。
+PID 的 P/I/D 原始和与前馈先相加，再统一限幅到 ±30000；抗积分饱和也按该总和判定。
+速度环 `spd_pid.out` 仍仅表示限幅后的 PID 输出，最终发送量看 `pitch_control_debug.motor_cmd`。
+保留原积分与参数；接入前馈后，积分通过闭环误差自然回退，不能同时把积分上限当作重力系数。
+
+全局 `pitch_control_debug` 每个控制周期更新，仅写内存供调试器观察，没有新增任务、串口或 CAN 遥测：
+
+| 字段 | 含义 |
+| --- | --- |
+| `requested_angle_rad / target_angle_rad / actual_angle_rad` | 本周期限幅前目标、实际采用目标、INS 实测角度 |
+| `angle_error_rad / speed_rad_s` | 位置误差、实际角速度（rad/s） |
+| `p_out / i_out / d_out / pid_unclamped_out` | PID 分项、未限幅 PID 和（均在抗饱和处理之后） |
+| `gravity_target_out / gravity_out` | 独立限幅后的前馈目标、平滑后实际前馈 |
+| `total_unclamped_out / total_out / motor_cmd` | 未限幅总和、限幅总和、方向取反后的实际 CAN 给定 |
+| `target_limited / integral_limited` | 本周期目标是否被截断、积分是否已达到 ±3000 |
+| `pid_saturated / total_saturated` | PID 自身是否达到限幅、合成后总输出是否达到限幅 |
+| `integral_blocked` | 本周期是否因合成输出饱和而拒绝进一步同向积分 |
+| `gravity_limited / gravity_config_invalid / control_enabled` | 前馈限幅、参数异常撤下前馈、控制使能状态 |
+
+标志反映当前周期，`target_limited` 在新目标到来时可能短暂置位；调试器读取多个字段不是原子快照。
+先比较采用目标与实际角度，再看积分和总输出标志；若总输出已经到限，前馈没有额外输出余量。
+宿主测试仍运行上述 `test_pitch_integral.py`，另覆盖余弦/偏移、正负方向、平滑、总和限幅及前馈参与抗饱和。
+
 ## VOFA 观测：C 板 3-pin 接口
 
 当前本地版本已完全撤下 VOFA 接入：CMake 和 Keil 均不编译 `vofa_debug.c`，

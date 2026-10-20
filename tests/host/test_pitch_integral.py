@@ -1,4 +1,4 @@
-"""宿主验证真实 Pitch 控制函数及 PID 实现；不模拟或宣称实机稳定性。"""
+"""验证真实 Pitch 积分、重力前馈及限幅路径；不模拟或宣称实机稳定性。"""
 from pathlib import Path
 import os
 import re
@@ -38,6 +38,7 @@ prefix = r'''
 #include <stdio.h>
 #include <string.h>
 #include "pid.h"
+#include "gimbal_task.h"
 #define PI 3.14159265358979323846f
 typedef struct { float unused; } first_order_filter_type_t;
 volatile uint8_t rc_online = 1;
@@ -45,7 +46,8 @@ volatile uint8_t rc_online = 1;
 declarations = source[source.index('#define GIMBAL_TASK_CTRL_TIME'):
                       source.index('// 模式相关')]
 functions = '\n'.join(function(name) for name in (
-    'radFormat', 'gimbal_PID_calc', 'pitch_speed_pid_calc', 'unitPID_calc'))
+    'radFormat', 'gimbal_PID_calc', 'calcPitchGravity',
+    'limitPitchOutput', 'pitch_speed_pid_calc', 'unitPID_calc'))
 tests = r'''
 static void near_value(float a, float b)
 {
@@ -56,6 +58,10 @@ static void setup(void)
 {
     memset(&PitchCtrl, 0, sizeof(PitchCtrl));
     memset(&YawCtrl, 0, sizeof(YawCtrl));
+    memset((void *)&pitch_control_debug, 0, sizeof(pitch_control_debug));
+    pitch_gravity_config.gain = 0;
+    pitch_gravity_config.offset_rad = 0;
+    pitch_gravity_output = 0;
     rc_online = 1;
     PID_init(&PitchCtrl.spd_pid, PID_POSITION, pitchSpdPIDco,
              PITCH_VOLT_MAX_OUT, PITCH_VOLT_MAX_IOUT);
@@ -177,13 +183,146 @@ int main(void)
         near_value(YawCtrl.spd_pid.out, yaw_speed.out);
         assert(YawCtrl.Volt_out == (int16_t)yaw_speed.out);
     }
-    puts("PASS: Pitch integral/time scaling/limits/anti-windup/disable/re-enable/tick wrap; Yaw unchanged");
+    /* 零误差也有保持补偿；电机方向只在最终输出处取反。 */
+    setup();
+    pitch_gravity_config.gain = -1200;
+    for (int i = 0; i < 100; ++i) unitPID_calc();
+    near_value(pitch_control_debug.gravity_out, -1200);
+    near_value(PitchCtrl.spd_pid.out, 0);
+    assert(PitchCtrl.Volt_out == 1200);
+    assert(pitch_control_debug.motor_cmd == PitchCtrl.Volt_out);
+    assert(pitch_control_debug.control_enabled);
+    assert(!pitch_control_debug.total_saturated);
+
+    /* 补偿随实际角度变化，保持、上行和下行均不按误差方向翻转。 */
+    setup();
+    pitch_gravity_config.gain = 1200;
+    PitchCtrl.nowAbsoluteAngle = PI / 6;
+    PitchCtrl.want_AbsoluteAngleCtrl = PitchCtrl.nowAbsoluteAngle;
+    for (int i = 0; i < 200; ++i) unitPID_calc();
+    near_value(pitch_control_debug.gravity_out, 1200 * cosf(PI / 6));
+    const float held_gravity = pitch_control_debug.gravity_out;
+    PitchCtrl.want_AbsoluteAngleCtrl = 0.6f;
+    unitPID_calc();
+    near_value(pitch_control_debug.gravity_out, held_gravity);
+    PitchCtrl.want_AbsoluteAngleCtrl = 0.4f;
+    unitPID_calc();
+    near_value(pitch_control_debug.gravity_out, held_gravity);
+    pitch_gravity_config.offset_rad = PI / 3;
+    for (int i = 0; i < 200; ++i) unitPID_calc();
+    near_value(pitch_control_debug.gravity_out, 0);
+
+    /* 前馈按真实经过时间限速，异常间隔不追补；独立上限两个方向均生效。 */
+    for (int period = 1; period <= 5; ++period) {
+        setup();
+        pitch_gravity_config.gain = 2000;
+        PitchCtrl.nowTime = period;
+        for (int t = 0; t < 100; t += period) unitPID_calc();
+        near_value(pitch_control_debug.gravity_out,
+                   PITCH_GRAVITY_SLEW_PER_SECOND * period * ((100 + period - 1) / period) * 0.001f);
+        const float before_pause = pitch_control_debug.gravity_out;
+        PitchCtrl.nowTime = 1000;
+        unitPID_calc();
+        near_value(pitch_control_debug.gravity_out, before_pause);
+        PitchCtrl.nowTime = 0;
+        unitPID_calc();
+        near_value(pitch_control_debug.gravity_out, before_pause);
+    }
+    for (int sign = -1; sign <= 1; sign += 2) {
+        setup();
+        pitch_gravity_config.gain = sign * 10000;
+        for (int i = 0; i < 1000; ++i) unitPID_calc();
+        near_value(pitch_control_debug.gravity_out, sign * PITCH_GRAVITY_MAX_OUT);
+        assert(pitch_control_debug.gravity_limited);
+        assert(fabsf((float)PitchCtrl.Volt_out) <= PITCH_GRAVITY_MAX_OUT);
+        pitch_gravity_config.gain = 0;
+        for (int i = 0; i < 1000; ++i) unitPID_calc();
+        near_value(pitch_control_debug.gravity_out, 0);
+        assert(PitchCtrl.Volt_out == 0);
+    }
+
+    /* PID 尚未饱和，但加前馈后饱和：应阻止同向积分，并限制最终总输出。 */
+    for (int sign = -1; sign <= 1; sign += 2) {
+        setup();
+        PitchCtrl.spd_pid.Kd = 0;
+        PitchCtrl.agl_pid.out = sign * 0.00725f; /* P = +/-29000 */
+        pitch_control_debug_t debug = {0};
+        near_value(pitch_speed_pid_calc(sign * 2000, &debug), sign * 30000);
+        near_value(PitchCtrl.spd_pid.Iout, 0);
+        assert(debug.integral_blocked && debug.total_saturated && !debug.pid_saturated);
+
+        /* PID 自身超限、前馈反向抵消时，不能先截断 PID；积分应能继续。 */
+        setup();
+        PitchCtrl.spd_pid.Kd = 0;
+        PitchCtrl.agl_pid.out = sign * 0.00775f; /* P = +/-31000, I = +/-62 */
+        memset(&debug, 0, sizeof(debug));
+        near_value(pitch_speed_pid_calc(-sign * 2000, &debug), sign * 29062);
+        near_value(PitchCtrl.spd_pid.Iout, sign * 62);
+        assert(!debug.integral_blocked && !debug.total_saturated && debug.pid_saturated);
+    }
+
+    /* 总输出仍然饱和时，允许反向积分释放。 */
+    setup();
+    PitchCtrl.spd_pid.Kd = 0;
+    PitchCtrl.spd_pid.Iout = 3000;
+    PitchCtrl.spd_pid.max_out = 5000;
+    PitchCtrl.agl_pid.out = -0.00002f;
+    pitch_control_debug_t debug = {0};
+    near_value(pitch_speed_pid_calc(3000, &debug), 5000);
+    assert(PitchCtrl.spd_pid.Iout < 3000);
+    assert(!debug.integral_blocked && debug.total_saturated);
+
+    /* 已建立补偿后停机必须立即归零，重新使能从零缓升。 */
+    for (int offline = 0; offline <= 1; ++offline) {
+        setup();
+        pitch_gravity_config.gain = 1200;
+        for (int i = 0; i < 100; ++i) unitPID_calc();
+        PitchCtrl.nopowerflag = !offline;
+        rc_online = !offline;
+        unitPID_calc();
+        near_value(pitch_gravity_output, 0);
+        assert(PitchCtrl.Volt_out == 0 && pitch_control_debug.motor_cmd == 0);
+        assert(!pitch_control_debug.control_enabled);
+        PitchCtrl.nopowerflag = 0;
+        rc_online = 1;
+        unitPID_calc();
+        near_value(pitch_control_debug.gravity_out, 12);
+        assert(PitchCtrl.Volt_out == -12);
+    }
+
+    /* 三类限幅观测分开，避免把目标限幅或积分限幅误认作总输出饱和。 */
+    setup();
+    PitchCtrl.want_AbsoluteAngleCtrl = -1;
+    unitPID_calc();
+    near_value(pitch_control_debug.requested_angle_rad, -1);
+    near_value(pitch_control_debug.target_angle_rad, PITCH_MIN_ANGLE);
+    assert(pitch_control_debug.target_limited);
+    setup();
+    PitchCtrl.spd_pid.Iout = PITCH_VOLT_MAX_IOUT;
+    unitPID_calc();
+    assert(pitch_control_debug.integral_limited);
+    assert(!pitch_control_debug.pid_saturated && !pitch_control_debug.total_saturated);
+
+    /* 调试器写入无效参数时撤下前馈，避免 NaN 污染电机控制量。 */
+    setup();
+    pitch_gravity_output = 1200;
+    pitch_gravity_config.gain = NAN;
+    unitPID_calc();
+    assert(pitch_control_debug.gravity_config_invalid);
+    assert(PitchCtrl.Volt_out == 0);
+    pitch_gravity_config.gain = 1200;
+    pitch_gravity_config.offset_rad = INFINITY;
+    unitPID_calc();
+    assert(pitch_control_debug.gravity_config_invalid);
+    assert(PitchCtrl.Volt_out == 0);
+
+    puts("PASS: Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
 }
 '''
 (out / 'test.c').write_text(prefix + declarations + functions + tests, encoding='utf-8')
 exe = out / ('test_pitch_integral.exe' if os.name == 'nt' else 'test_pitch_integral')
 subprocess.run([cc, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
                 '-I', str(out), '-I', str(root / 'Control'),
-                '-I', str(root / 'Applications'), str(out / 'test.c'),
+                '-I', str(root / 'Applications'), '-I', str(root / 'Task'), str(out / 'test.c'),
                 str(root / 'Control/pid.c'), '-lm', '-o', str(exe)], check=True)
 subprocess.run([str(exe)], check=True)

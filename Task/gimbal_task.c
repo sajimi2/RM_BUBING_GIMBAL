@@ -57,6 +57,12 @@
 #define YAW_VOLT_MAX_OUT 30000.0f
 #define YAW_VOLT_MAX_IOUT 10000.0f
 
+// Pitch重力补偿参数，输出单位与速度环PID相同，幅值和方向需实车标定
+#define PITCH_GRAVITY_GAIN_DEFAULT    0.0f    // 补偿幅值，默认0，不产生补偿
+#define PITCH_GRAVITY_OFFSET_DEFAULT  0.0f    // 补偿曲线的角度偏移，单位rad
+#define PITCH_GRAVITY_MAX_OUT         3000.0f // 补偿自身的输出限幅
+#define PITCH_GRAVITY_SLEW_PER_SECOND 6000.0f // 补偿每秒最多变化的控制量
+
 // 位置环输出限幅
 #define YAW_AGL_SPD_MAX_OUT (50.0f)
 #define YAW_AGL_SPD_MAX_IOUT (11.7f)
@@ -155,6 +161,13 @@ struct GimbalMotorCtrl_s
 static struct GimbalMotorCtrl_s PitchCtrl, YawCtrl;
 static struct GimbalMotorCtrl_s *gimbalCtrl[2] = {&PitchCtrl, &YawCtrl};
 
+volatile pitch_gravity_config_t pitch_gravity_config = {
+    PITCH_GRAVITY_GAIN_DEFAULT,
+    PITCH_GRAVITY_OFFSET_DEFAULT
+};
+volatile pitch_control_debug_t pitch_control_debug;
+static fp32 pitch_gravity_output; // 上一周期的补偿，用于限制本周期的变化速度
+
 // PID参数数组
 static fp32 pitchSpdPIDco[3] = {PITCH_SPD_KP, PITCH_SPD_KI, PITCH_SPD_KD};
 static fp32 yawSpdPIDco[3] = {YAW_SPD_KP, YAW_SPD_KI, YAW_SPD_KD};
@@ -237,6 +250,8 @@ void gimbal_task(void const *pvParameters)
         {
             YawCtrl.Volt_out = 0;
             PitchCtrl.Volt_out = 0;
+            pitch_control_debug.motor_cmd = 0;
+            pitch_control_debug.control_enabled = 0;
         }
 		else
 		{
@@ -517,11 +532,103 @@ void getControlAngles(void)
     lastMode = *robotMode;
 }
 
-/* 仅供 Pitch 速度环使用，保留原 P/D 与速度死区；不改变其他轴的 PID_calc。
- * Ki 沿用每 2 ms 一次的参数单位，按控制环时间缩放，与视觉收包次数无关。
- * 输出饱和时拒绝继续加深饱和的积分，允许反向误差消退已有积分。
+/**
+ * @brief 根据当前实际角度计算Pitch重力补偿，并限制补偿的大小和变化速度
+ *
+ * 手动、自瞄和静止保持共用，不按追踪方向改变补偿方向。
+ * 无力或遥控掉线时，由unitPID_calc立即清零补偿。
  */
-static void pitch_speed_pid_calc(void)
+static fp32 calcPitchGravity(pitch_control_debug_t *debug)
+{
+    const fp32 gain = pitch_gravity_config.gain;
+    const fp32 offset = pitch_gravity_config.offset_rad;
+    const fp32 angle = PitchCtrl.nowAbsoluteAngle;
+    const uint32_t dt = PitchCtrl.nowTime - PitchCtrl.lastTime; // 单位ms
+    fp32 gravityTarget = 0.0f;
+
+    // 参数或角度无效时，立即撤掉补偿
+    if (!isfinite(gain) || !isfinite(offset) ||
+        !isfinite(angle) || fabsf(offset) > PI)
+    {
+        pitch_gravity_output = 0.0f;
+        debug->gravity_config_invalid = 1;
+        return 0.0f;
+    }
+
+    // 计算目标补偿，公式中的角度均为rad；gain为0时，目标补偿也为0
+    if (gain != 0.0f)
+    {
+        gravityTarget = gain * cosf(angle + offset);
+    }
+    debug->gravity_limited = fabsf(gravityTarget) > PITCH_GRAVITY_MAX_OUT;
+    range_limit_inside(gravityTarget, PITCH_GRAVITY_MAX_OUT);
+
+    // 逐步靠近目标补偿，正常2 ms周期内每次最多变化12
+    // gain改为0也逐步退回零；周期为0或过长时，保持上次补偿
+    if (dt > 0U && dt <= PITCH_I_MAX_DT_MS)
+    {
+        const fp32 maxStep = PITCH_GRAVITY_SLEW_PER_SECOND * (fp32)dt * 0.001f;
+        fp32 step = gravityTarget - pitch_gravity_output;
+        range_limit_inside(step, maxStep);
+        pitch_gravity_output += step;
+    }
+
+    // 记录目标补偿和本周期实际采用的补偿
+    debug->gravity_target_out = gravityTarget;
+    debug->gravity_out = pitch_gravity_output;
+    return pitch_gravity_output;
+}
+
+/**
+ * @brief 合并Pitch速度环PID和重力补偿，处理积分及总输出限幅
+ * @param gravityOut 本周期的重力补偿
+ * @param lastIout 本次PID计算前的积分，用于撤销加重超限的积分
+ * @return 限幅后的总输出，尚未转换电机方向
+ */
+static fp32 limitPitchOutput(fp32 gravityOut, fp32 lastIout, pitch_control_debug_t *debug)
+{
+    pid_type_def *pid = &PitchCtrl.spd_pid;
+    fp32 totalOut = pid->Pout + pid->Iout + pid->Dout + gravityOut;
+    const fp32 integralChange = pid->Iout - lastIout;
+
+    // 总输出超限时，撤销继续加重超限的积分；反向释放的积分仍保留
+    if ((totalOut > pid->max_out && integralChange > 0.0f) ||
+        (totalOut < -pid->max_out && integralChange < 0.0f))
+    {
+        pid->Iout = lastIout;
+        debug->integral_blocked = 1;
+    }
+
+    // 积分可能被撤销，重新计算PID输出；pid->out仍只记录PID自身的限幅结果
+    const fp32 pidOut = pid->Pout + pid->Iout + pid->Dout;
+    pid->out = pidOut;
+    range_limit_inside(pid->out, pid->max_out);
+
+    // 总输出使用未限幅的PID值，先加重力补偿再限幅，不能直接用pid->out
+    totalOut = pidOut + gravityOut;
+    const fp32 totalBeforeLimit = totalOut;
+    range_limit_inside(totalOut, pid->max_out);
+
+    // 记录计算结果和各自是否到达上限，调试数据不参与控制计算
+    debug->p_out = pid->Pout;
+    debug->i_out = pid->Iout;
+    debug->d_out = pid->Dout;
+    debug->pid_unclamped_out = pidOut;
+    debug->total_unclamped_out = totalBeforeLimit;
+    debug->total_out = totalOut;
+    debug->integral_limited = fabsf(pid->Iout) >= pid->max_iout;
+    debug->pid_saturated = fabsf(pidOut) >= pid->max_out;
+    debug->total_saturated = fabsf(totalBeforeLimit) >= pid->max_out;
+    return totalOut;
+}
+
+/**
+ * @brief 计算Pitch速度环PID，再合并重力补偿并处理限幅
+ *
+ * 保留原 P/D 与速度死区；不改变其他轴的 PID_calc。
+ * Ki 沿用每 2 ms 一次的参数单位，按控制环时间缩放，与视觉收包次数无关。
+ */
+static fp32 pitch_speed_pid_calc(fp32 gravity_out, pitch_control_debug_t *debug)
 {
     pid_type_def *pid = &PitchCtrl.spd_pid;
     const fp32 previous_i = pid->Iout;
@@ -534,15 +641,7 @@ static void pitch_speed_pid_calc(void)
     PID_calc(pid, PitchCtrl.radspeed, PitchCtrl.agl_pid.out);
     pid->Ki = nominal_ki;
 
-    const fp32 unclamped_out = pid->Pout + pid->Iout + pid->Dout;
-    const fp32 integral_step = pid->Iout - previous_i;
-    if ((unclamped_out > pid->max_out && integral_step > 0.0f) ||
-        (unclamped_out < -pid->max_out && integral_step < 0.0f))
-    {
-        pid->Iout = previous_i;
-        pid->out = pid->Pout + pid->Iout + pid->Dout;
-        range_limit_inside(pid->out, pid->max_out);
-    }
+    return limitPitchOutput(gravity_out, previous_i, debug);
 }
 
 /**
@@ -550,15 +649,24 @@ static void pitch_speed_pid_calc(void)
  */
 void unitPID_calc(void)
 {
-
+    // 每周期重新记录，停机时未计算的输出和标志保持为零
+    pitch_control_debug_t debug = {0};
+    debug.requested_angle_rad = PitchCtrl.want_AbsoluteAngleCtrl;
     if (PitchCtrl.want_AbsoluteAngleCtrl > PITCH_MAX_ANGLE)
     {
         PitchCtrl.want_AbsoluteAngleCtrl = PITCH_MAX_ANGLE;
+        debug.target_limited = 1;
     }
     else if (PitchCtrl.want_AbsoluteAngleCtrl < PITCH_MIN_ANGLE)
     {
         PitchCtrl.want_AbsoluteAngleCtrl = PITCH_MIN_ANGLE;
+        debug.target_limited = 1;
     }
+
+    debug.target_angle_rad = PitchCtrl.want_AbsoluteAngleCtrl;
+    debug.actual_angle_rad = PitchCtrl.nowAbsoluteAngle;
+    debug.speed_rad_s = PitchCtrl.radspeed * 1000.0f;
+    debug.angle_error_rad = radFormat(debug.target_angle_rad - debug.actual_angle_rad);
 
     // Yaw轴位置环PID计算
     gimbal_PID_calc(&(YawCtrl.agl_pid), YawCtrl.nowAbsoluteAngle, YawCtrl.want_AbsoluteAngleCtrl);
@@ -577,15 +685,23 @@ void unitPID_calc(void)
     {
         PID_clear(&(PitchCtrl.spd_pid));
         PID_clear(&(PitchCtrl.agl_pid));
+        pitch_gravity_output = 0.0f;
         PitchCtrl.Volt_out = 0;
+        pitch_control_debug = debug;
         return;
     }
 
     // Pitch轴位置环PID计算
     gimbal_PID_calc(&(PitchCtrl.agl_pid), PitchCtrl.nowAbsoluteAngle, PitchCtrl.want_AbsoluteAngleCtrl);
-    // Pitch轴速度环PID计算
-    pitch_speed_pid_calc();
-    PitchCtrl.Volt_out = -PitchCtrl.spd_pid.out;//changedv2
+    // 计算重力补偿，由速度环合并PID输出并处理限幅
+    const fp32 gravity_out = calcPitchGravity(&debug);
+    const fp32 total_out = pitch_speed_pid_calc(gravity_out, &debug);
+
+    // 转换电机方向，并保存本周期的调试记录
+    PitchCtrl.Volt_out = (int16_t)(-total_out);
+    debug.motor_cmd = PitchCtrl.Volt_out;
+    debug.control_enabled = 1;
+    pitch_control_debug = debug;
 }
 
 /**
