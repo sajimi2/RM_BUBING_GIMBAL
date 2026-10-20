@@ -459,6 +459,7 @@ void getControlAngles(void)
     // 自动控制模式
 
 	delta_pitch = -(float)(nx_p->pitch)*3.1415926f/32767-PitchCtrl.nowAbsoluteAngle;
+    //算增量
     delta_yaw = (float)(nx_p->yaw)*3.1415926f/32767-YawCtrl.nowAbsoluteAngle;
 //	if(delta_pitch <= target && delta_pitch >= target)
 //	{
@@ -476,11 +477,12 @@ void getControlAngles(void)
         if (data_ready == 1 )//&& nx_p->mode != 0)
         {
             
+            // delta 以当前实测角度为基准，不能累加到旧目标，否则会重复叠加跟踪误差。
             // Pitch轴自动控制
-            PitchCtrl.want_AbsoluteAngleCtrl += delta_pitch; // 视觉直接给定目标角度
+            PitchCtrl.want_AbsoluteAngleCtrl = PitchCtrl.nowAbsoluteAngle + delta_pitch;
 
             // Yaw轴自动控制
-            YawCtrl.want_AbsoluteAngleCtrl += delta_yaw; // 视觉直接给定目标角度
+            YawCtrl.want_AbsoluteAngleCtrl = YawCtrl.nowAbsoluteAngle + delta_yaw;
 				
             data_ready = 0;
         }
