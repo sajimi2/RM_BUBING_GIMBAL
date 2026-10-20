@@ -56,16 +56,16 @@
 #define YAW_AGL_KD 0.00000f
 
 // 功率保护参数
-#define PITCH_VOLT_MAX_OUT 30000.0f
+#define PITCH_VOLT_MAX_OUT 24000.0f //GM6020手册上写的是25000，软件要比硬件严格一点
 #define PITCH_VOLT_MAX_IOUT 3000.0f
 #define YAW_VOLT_MAX_OUT 30000.0f
 #define YAW_VOLT_MAX_IOUT 10000.0f
 
 // Pitch重力补偿参数，输出单位与速度环PID相同，幅值和方向需实车标定
-#define PITCH_GRAVITY_GAIN_DEFAULT    0.0f    // 补偿幅值，默认0，不产生补偿
-#define PITCH_GRAVITY_OFFSET_DEFAULT  0.0f    // 补偿曲线的角度偏移，单位rad
-#define PITCH_GRAVITY_MAX_OUT         3000.0f // 补偿自身的输出限幅
-#define PITCH_GRAVITY_SLEW_PER_SECOND 6000.0f // 补偿每秒最多变化的控制量
+#define PITCH_GRAVITY_GAIN_DEFAULT    -800.0f    // 补偿幅值
+#define PITCH_GRAVITY_OFFSET_DEFAULT  0.0f    // 调整在哪个俯仰角的补偿最大，默认0=水平
+#define PITCH_GRAVITY_MAX_OUT         5000.0f // 补偿自身的输出限幅
+#define PITCH_GRAVITY_SLEW_PER_SECOND 20000.0f // 补偿每秒最多变化的控制量
 
 // 位置环输出限幅
 #define YAW_AGL_SPD_MAX_OUT (50.0f)

@@ -22,9 +22,9 @@ typedef struct
     // 目标与反馈
     fp32 requested_angle_rad; // 限幅前的目标角度，单位rad
     fp32 target_angle_rad;    // 限幅后，实际交给位置环的目标角度，单位rad
-    fp32 actual_angle_rad;    // INS测得的当前角度，单位rad
+    fp32 actual_angle_rad;    // 枪口目前角度，弧度
     fp32 speed_rad_s;         // 当前速度，内部rad/ms已换算为rad/s
-    fp32 angle_error_rad;     // 目标减实际角度，归一化到[-PI, PI]
+    fp32 angle_error_rad;     // 离目标差多少角度
 
     // 速度环PID，I项已经过积分限幅和超限处理
     fp32 p_out;
@@ -39,7 +39,7 @@ typedef struct
     fp32 total_out;           // 总输出限幅后的结果
     int16_t motor_cmd;        // total_out取反并转为整数后的电机指令
 
-    // 各种限幅分开记录，便于判断是哪一步到达上限
+    // 各种限幅分开记录，便于判断是哪一步到达上限，标志位，0/1
     uint8_t control_enabled;        // 本周期已执行Pitch控制
     uint8_t target_limited;         // 请求角度被限制在允许范围内
     uint8_t integral_limited;       // I项达到积分上限
