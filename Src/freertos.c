@@ -33,6 +33,7 @@
 #include "shoot_task.h"
 #include "NX_communicate.h"
 #include "Reset_task.h"
+#include "tuning_uart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -134,7 +135,7 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the thread(s) */
   /* definition and creation of test */
-  osThreadDef(test, test_task, osPriorityNormal, 0, 128);
+  osThreadDef(test, test_task, osPriorityNormal, 0, 512);
   testHandle = osThreadCreate(osThread(test), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
@@ -174,10 +175,12 @@ __weak void test_task(void const * argument)
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN test_task */
+  tuning_uart_init();
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    tuning_uart_poll();
+    osDelay(5);
   }
   /* USER CODE END test_task */
 }

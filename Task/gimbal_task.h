@@ -5,7 +5,7 @@
 #include "struct_typedef.h"
 
 /* 重力补偿 = gain * cos(实际Pitch角度 + offset_rad)。
- * 可在调试器中修改；默认gain=0，标定后再写回gimbal_task.c的默认值。
+ * 可在调试器或调参串口中修改；上电值见gimbal_task.c中的DEFAULT宏。
  */
 typedef struct
 {
@@ -55,6 +55,34 @@ extern volatile pitch_gravity_config_t pitch_gravity_config;
 extern volatile pitch_control_debug_t pitch_control_debug;
 /* 积分分离阈值（rad）：角度误差超过它时暂停积分，可在调试器里修改。 */
 extern volatile fp32 pitch_i_separation_rad;
+
+/* 调参任务读取一致的快照；不会把调试结构体作为控制输入。 */
+typedef struct
+{
+    uint32_t tick_ms;
+    pitch_gravity_config_t gravity;
+    pitch_control_debug_t control;
+    fp32 speed_ki;
+    uint8_t source;
+    uint8_t remote_online;
+    uint8_t automatic;
+} pitch_tuning_state_t;
+
+typedef struct
+{
+    fp32 pitch_min_rad;
+    fp32 pitch_max_rad;
+    fp32 gain_max;
+    fp32 offset_max_rad;
+    fp32 gravity_max_out;
+    fp32 total_max_out;
+} pitch_tuning_limits_t;
+
+void gimbal_tuning_get_state(pitch_tuning_state_t *state);
+void gimbal_tuning_get_limits(pitch_tuning_limits_t *limits);
+uint8_t gimbal_tuning_set_gravity(fp32 gain, fp32 offset_rad);
+uint8_t gimbal_tuning_set_source(uint8_t source);
+uint8_t gimbal_tuning_submit_vision(const uint8_t payload[8]);
 
 void gimbal_task(void const *pvParameters);
 extern const struct GimbalMotorCtrl_s* get_wantedyaw_point(void);

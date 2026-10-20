@@ -31,6 +31,18 @@ typedef union
 extern CAN_Send_to_MCU NX_data;
 extern volatile uint8_t data_ready;
 
+enum nx_input_source
+{
+    NX_SOURCE_CAN = 0,
+    NX_SOURCE_UART = 1
+};
+
+/* CAN 和调参串口共用同一份八字节视觉载荷。切换来源时丢弃未消费的旧帧。 */
+uint8_t NX_GetSource(void);
+void NX_SelectSource(uint8_t source);
+uint8_t NX_ReceiveFrame(const uint8_t payload[8], uint8_t source);
+uint8_t NX_TakeControlFrame(CAN_Send_to_MCU *frame, uint8_t *source);
+
 void NXrecieve_Init(void);
 void Send_Gimbal_Information(void);
 const CAN_Send_to_MCU* get_nx_control_point(void);

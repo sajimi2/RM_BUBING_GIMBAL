@@ -80,37 +80,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)//收取回调，
 		}
 		case 0x005:
 {
-    typedef union
-    {
-        CAN_Send_to_MCU NX_data;
-        uint8_t data[8];
-    } can_recieve_nx_data;
-
-    can_recieve_nx_data data_u;
-    memset(&data_u, 0, sizeof(data_u));
-
-    // 手动按小端序解析 yaw（第2、3字节）
-    data_u.NX_data.yaw = (int16_t)(
-        ((uint16_t)rx_data[1] << 0) |  // 低8位
-        ((uint16_t)rx_data[2] << 8)    // 高8位
-    );
-
-    // 手动按小端序解析 pitch（第4、5字节）
-    data_u.NX_data.pitch = (int16_t)(
-        ((uint16_t)rx_data[3] << 0) |  // 低8位
-        ((uint16_t)rx_data[4] << 8)    // 高8位
-    );
-
-    // 其他字节按需拷贝
-    data_u.data[0] = rx_data[0];
-    data_u.data[5] = rx_data[5];
-    data_u.data[6] = rx_data[6];
-    data_u.data[7] = rx_data[7];
-
-    NX_data = data_u.NX_data;
-    data_ready = 1;
-	
-	fire_t = NX_data.fire;
+    if (rx_header.IDE == CAN_ID_STD && rx_header.RTR == CAN_RTR_DATA && rx_header.DLC == 8U)
+        NX_ReceiveFrame(rx_data, NX_SOURCE_CAN);
     break;
 }
         default:

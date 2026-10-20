@@ -20,6 +20,67 @@ Send_Quaternion u16_Quaternion;
 INS_t *Raw_Quaternion;
 
 volatile uint8_t data_ready = 0;
+static volatile uint8_t input_source = NX_SOURCE_CAN;
+extern uint8_t fire_t;
+
+uint8_t NX_GetSource(void)
+{
+    return input_source;
+}
+
+void NX_SelectSource(uint8_t source)
+{
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    if (source != input_source)
+    {
+        input_source = source;
+        data_ready = 0;
+        fire_t = 0;
+    }
+    __set_PRIMASK(key);
+}
+
+uint8_t NX_ReceiveFrame(const uint8_t payload[8], uint8_t source)
+{
+    CAN_Send_to_MCU frame;
+    uint32_t key;
+    uint8_t accepted = 0;
+    frame.mode = payload[0];
+    frame.yaw = (int16_t)((uint16_t)payload[1] | ((uint16_t)payload[2] << 8));
+    frame.pitch = (int16_t)((uint16_t)payload[3] | ((uint16_t)payload[4] << 8));
+    frame.fire = payload[5];
+    frame.rev = (int16_t)((uint16_t)payload[6] | ((uint16_t)payload[7] << 8));
+
+    /* 串口任务和 CAN 中断都能发布数据；短临界区保证来源与整帧一起更新。 */
+    key = __get_PRIMASK();
+    __disable_irq();
+    if (source == input_source)
+    {
+        NX_data = frame;
+        fire_t = frame.fire;
+        data_ready = 1;
+        accepted = 1;
+    }
+    __set_PRIMASK(key);
+    return accepted;
+}
+
+uint8_t NX_TakeControlFrame(CAN_Send_to_MCU *frame, uint8_t *source)
+{
+    uint8_t ready;
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    ready = data_ready;
+    if (ready)
+    {
+        *frame = NX_data;
+        *source = input_source;
+        data_ready = 0;
+    }
+    __set_PRIMASK(key);
+    return ready;
+}
 
 void NXrecieve_Init(void)
 {

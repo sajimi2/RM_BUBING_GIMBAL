@@ -1,5 +1,7 @@
 # BubinGimbalV1.0
 
+串口在线调重力参数、模拟视觉目标的接线和使用说明见 [SERIAL_TUNING.md](SERIAL_TUNING.md)。当前已实现板端与电脑通信层，图形界面原型尚未连接实物。
+
 步兵云台 C 板固件，STM32F407IGHx + FreeRTOS。车上烧录的基线及其来源见 `BASELINE.md`。
 
 ## 构建与烧录（VS Code + CMake）

@@ -1,6 +1,6 @@
 """验证真实 Pitch 积分、重力前馈及限幅路径；不模拟或宣称实机稳定性。
 
-工程默认 PITCH_SPD_KI=0、重力 gain=0，与车上基线行为一致；
+测试显式设置 Ki=0、重力 gain=0，验证关闭补偿时的基线行为；
 积分相关用例在测试里显式设定 TEST_KI，只验证积分路径本身。
 """
 from pathlib import Path
@@ -103,9 +103,8 @@ static float integrate_for_ms(uint32_t period_ms, int duration_ms)
 
 int main(void)
 {
-    /* 默认参数：Ki=0、gain=0，Pitch 输出与基线 gimbal_PID_calc + PID_calc 逐周期一致。 */
+    /* Test setup：Ki=0、gain=0，Pitch 输出与基线 gimbal_PID_calc + PID_calc 逐周期一致。 */
     assert(PITCH_SPD_KI == 0.0f);
-    assert(PITCH_GRAVITY_GAIN_DEFAULT == 0.0f);
     setup_default();
     {
         pid_type_def base_angle = PitchCtrl.agl_pid;
@@ -253,7 +252,7 @@ int main(void)
         PitchCtrl.nowTime = period;
         for (int t = 0; t < 100; t += period) unitPID_calc();
         near_value(pitch_control_debug.gravity_out,
-                   PITCH_GRAVITY_SLEW_PER_SECOND * period * ((100 + period - 1) / period) * 0.001f);
+                   fminf(2000, PITCH_GRAVITY_SLEW_PER_SECOND * period * ((100 + period - 1) / period) * 0.001f));
         const float before_pause = pitch_control_debug.gravity_out;
         PitchCtrl.nowTime = 1000;
         unitPID_calc();
@@ -279,19 +278,20 @@ int main(void)
     for (int sign = -1; sign <= 1; sign += 2) {
         setup();
         PitchCtrl.spd_pid.Kd = 0;
-        PitchCtrl.agl_pid.out = sign * 0.00725f; /* P = +/-29000 */
+        PitchCtrl.agl_pid.out = sign * (PITCH_VOLT_MAX_OUT - 1000) / PITCH_SPD_KP;
         pitch_control_debug_t debug = {0};
-        near_value(pitch_speed_pid_calc(sign * 2000, &debug), sign * 30000);
+        near_value(pitch_speed_pid_calc(sign * 2000, &debug), sign * PITCH_VOLT_MAX_OUT);
         near_value(PitchCtrl.spd_pid.Iout, 0);
         assert(debug.integral_blocked && debug.total_saturated && !debug.pid_saturated);
 
         /* PID 自身超限、前馈反向抵消时，不能先截断 PID；积分应能继续。 */
         setup();
         PitchCtrl.spd_pid.Kd = 0;
-        PitchCtrl.agl_pid.out = sign * 0.00775f; /* P = +/-31000, I = +/-62 */
+        PitchCtrl.agl_pid.out = sign * (PITCH_VOLT_MAX_OUT + 1000) / PITCH_SPD_KP;
+        const float expected_i = TEST_KI * PitchCtrl.agl_pid.out;
         memset(&debug, 0, sizeof(debug));
-        near_value(pitch_speed_pid_calc(-sign * 2000, &debug), sign * 29062);
-        near_value(PitchCtrl.spd_pid.Iout, sign * 62);
+        near_value(pitch_speed_pid_calc(-sign * 2000, &debug), sign * (PITCH_VOLT_MAX_OUT - 1000) + expected_i);
+        near_value(PitchCtrl.spd_pid.Iout, expected_i);
         assert(!debug.integral_blocked && !debug.total_saturated && debug.pid_saturated);
     }
 
@@ -320,8 +320,8 @@ int main(void)
         PitchCtrl.nopowerflag = 0;
         rc_online = 1;
         unitPID_calc();
-        near_value(pitch_control_debug.gravity_out, 12);
-        assert(PitchCtrl.Volt_out == -12);
+        near_value(pitch_control_debug.gravity_out, PITCH_GRAVITY_SLEW_PER_SECOND * 0.002f);
+        assert(PitchCtrl.Volt_out == (int16_t)(-PITCH_GRAVITY_SLEW_PER_SECOND * 0.002f));
     }
 
     /* 三类限幅观测分开，避免把目标限幅或积分限幅误认作总输出饱和。 */
@@ -370,7 +370,7 @@ int main(void)
     assert(PitchCtrl.spd_pid.Iout > before_wide);
     pitch_i_separation_rad = PITCH_I_SEPARATION_RAD_DEFAULT;
 
-    puts("PASS: defaults match baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
+    puts("PASS: compensation-off matches baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
 }
 '''
 (out / 'test.c').write_text(prefix + declarations + functions + tests, encoding='utf-8')

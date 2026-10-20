@@ -28,3 +28,6 @@ JLinkLog.txt
 # CMake/Ninja 输出及个人工具路径
 /build/
 /CMakeUserPresets.json
+
+# Python host tools and tests
+__pycache__/

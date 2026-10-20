@@ -480,6 +480,21 @@
           <GroupName>Debug</GroupName>
           <Files>
             <File>
+              <FileName>tuning_protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Debug\tuning_protocol.c</FilePath>
+            </File>
+            <File>
+              <FileName>tuning_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Debug\tuning_service.c</FilePath>
+            </File>
+            <File>
+              <FileName>tuning_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Debug\tuning_uart.c</FilePath>
+            </File>
+            <File>
               <FileName>usart6_debug.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Debug\usart6_debug.c</FilePath>

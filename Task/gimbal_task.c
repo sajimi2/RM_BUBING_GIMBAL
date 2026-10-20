@@ -26,6 +26,7 @@
 #include "bsp_laser.h"
 #include "shoot_task.h"
 #include "NX_communicate.h"
+#include "tuning_protocol.h"
 
 // 任务周期
 #define GIMBAL_TASK_CTRL_TIME 2
@@ -445,6 +446,12 @@ void refreshAngleStates(struct GimbalMotorCtrl_s *c)
  */
 void getControlAngles(void)
 {
+    CAN_Send_to_MCU frame;
+    uint8_t frame_source;
+    const uint8_t automatic = robotIsAuto() || rc_p->rc.s[1] == 2;
+    /* 退出自瞄或遥控掉线后撤掉串口来源，不能在重新使能时消费旧测试目标。 */
+    if (!automatic || !rc_online || *robotMode == RobotState_e_Powerless)
+        NX_SelectSource(NX_SOURCE_CAN);
     // 获取遥控器输入（带死区处理）
     int16_t yaw_channel = 0, pitch_channel = 0;
     rc_deadband_limit(rc_p->rc.ch[0], yaw_channel, RC_DEADLINE);   // 右摇杆X轴
@@ -483,9 +490,6 @@ void getControlAngles(void)
 	
     // 自动控制模式
 
-	delta_pitch = -(float)(nx_p->pitch)*3.1415926f/32767-PitchCtrl.nowAbsoluteAngle;
-    //算增量
-    delta_yaw = (float)(nx_p->yaw)*3.1415926f/32767-YawCtrl.nowAbsoluteAngle;
 //	if(delta_pitch <= target && delta_pitch >= target)
 //	{
 //		delta_pitch = 0;
@@ -496,20 +500,21 @@ void getControlAngles(void)
 //		delta_yaw = 0;
 //	}
 	// LYL
-    if (robotIsAuto() || rc_p->rc.s[1]==2 )
+    if (automatic)
     {
 		// LYL
-        if (data_ready == 1 )//&& nx_p->mode != 0)
+        if (NX_TakeControlFrame(&frame, &frame_source))
         {
+            delta_pitch = -(float)frame.pitch * 3.1415926f / 32767 - PitchCtrl.nowAbsoluteAngle;
+            delta_yaw = (float)frame.yaw * 3.1415926f / 32767 - YawCtrl.nowAbsoluteAngle;
             
             // delta 以当前实测角度为基准，不能累加到旧目标，否则会重复叠加跟踪误差。
             // Pitch轴自动控制
             PitchCtrl.want_AbsoluteAngleCtrl = PitchCtrl.nowAbsoluteAngle + delta_pitch;
 
             // Yaw轴自动控制
-            YawCtrl.want_AbsoluteAngleCtrl = YawCtrl.nowAbsoluteAngle + delta_yaw;
-				
-            data_ready = 0;
+            if (frame_source == NX_SOURCE_CAN)
+                YawCtrl.want_AbsoluteAngleCtrl = YawCtrl.nowAbsoluteAngle + delta_yaw;
         }
     } 
 	else
@@ -537,6 +542,79 @@ void getControlAngles(void)
 
     // 记录当前模式，用于下一次状态转换判断
     lastMode = *robotMode;
+}
+
+static uint8_t gimbal_tuning_is_enabled(void)
+{
+    return rc_online && robotMode != NULL && rc_p != NULL &&
+           *robotMode != RobotState_e_Powerless &&
+           (robotIsAuto() || rc_p->rc.s[1] == 2);
+}
+
+void gimbal_tuning_get_state(pitch_tuning_state_t *state)
+{
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    state->tick_ms = xTaskGetTickCount();
+    state->gravity = pitch_gravity_config;
+    state->control = pitch_control_debug;
+    state->speed_ki = PitchCtrl.spd_pid.Ki;
+    state->source = NX_GetSource();
+    state->remote_online = rc_online;
+    state->automatic = gimbal_tuning_is_enabled();
+    __set_PRIMASK(key);
+}
+
+void gimbal_tuning_get_limits(pitch_tuning_limits_t *limits)
+{
+    limits->pitch_min_rad = PITCH_MIN_ANGLE;
+    limits->pitch_max_rad = PITCH_MAX_ANGLE;
+    limits->gain_max = PITCH_GRAVITY_MAX_OUT;
+    limits->offset_max_rad = PI;
+    limits->gravity_max_out = PITCH_GRAVITY_MAX_OUT;
+    limits->total_max_out = PITCH_VOLT_MAX_OUT;
+}
+
+uint8_t gimbal_tuning_set_gravity(fp32 gain, fp32 offset_rad)
+{
+    uint32_t key;
+    if (!isfinite(gain) || !isfinite(offset_rad) ||
+        fabsf(gain) > PITCH_GRAVITY_MAX_OUT || fabsf(offset_rad) > PI)
+        return TUNING_OUT_OF_RANGE;
+    key = __get_PRIMASK();
+    __disable_irq();
+    pitch_gravity_config.gain = gain;
+    pitch_gravity_config.offset_rad = offset_rad;
+    __set_PRIMASK(key);
+    return TUNING_OK;
+}
+
+uint8_t gimbal_tuning_set_source(uint8_t source)
+{
+    if (source != NX_SOURCE_CAN && source != NX_SOURCE_UART)
+        return TUNING_BAD_PARAMETER;
+    if (source == NX_SOURCE_UART && !gimbal_tuning_is_enabled())
+        return TUNING_NOT_ENABLED;
+    NX_SelectSource(source);
+    return TUNING_OK;
+}
+
+uint8_t gimbal_tuning_submit_vision(const uint8_t payload[8])
+{
+    int16_t pitch_raw;
+    fp32 pitch_rad;
+    if (!gimbal_tuning_is_enabled())
+        return TUNING_NOT_ENABLED;
+    if (NX_GetSource() != NX_SOURCE_UART)
+        return TUNING_WRONG_SOURCE;
+    /* 模拟端只提供 Pitch 目标，不接受开火请求；Yaw 目标由原状态机保持。 */
+    if (payload[0] != 1U || payload[5] != 0U || payload[6] != 0U || payload[7] != 0U)
+        return TUNING_BAD_PARAMETER;
+    pitch_raw = (int16_t)((uint16_t)payload[3] | ((uint16_t)payload[4] << 8));
+    pitch_rad = -(fp32)pitch_raw * 3.1415926f / 32767;
+    if (pitch_rad < PITCH_MIN_ANGLE || pitch_rad > PITCH_MAX_ANGLE)
+        return TUNING_OUT_OF_RANGE;
+    return NX_ReceiveFrame(payload, NX_SOURCE_UART) ? TUNING_OK : TUNING_WRONG_SOURCE;
 }
 
 /**
