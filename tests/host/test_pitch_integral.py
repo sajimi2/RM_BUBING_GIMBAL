@@ -350,7 +350,27 @@ int main(void)
     assert(pitch_control_debug.gravity_config_invalid);
     assert(PitchCtrl.Volt_out == 0);
 
-    puts("PASS: defaults match baseline; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
+    /* 积分分离：大误差时暂停积分且保留已有积分；回到阈值内恢复积分；阈值可在运行时修改。 */
+    setup();
+    PitchCtrl.agl_pid.Kd = 0;
+    PitchCtrl.spd_pid.Iout = 1000;
+    PitchCtrl.want_AbsoluteAngleCtrl = 0.3f; /* 误差 0.3 rad > 0.1 */
+    for (int i = 0; i < 50; ++i) unitPID_calc();
+    near_value(PitchCtrl.spd_pid.Iout, 1000);
+    assert(pitch_control_debug.integral_separated);
+    PitchCtrl.want_AbsoluteAngleCtrl = 0.05f; /* 误差 0.05 rad < 0.1 */
+    unitPID_calc();
+    assert(!pitch_control_debug.integral_separated);
+    assert(PitchCtrl.spd_pid.Iout > 1000);
+    pitch_i_separation_rad = 0.5f;
+    PitchCtrl.want_AbsoluteAngleCtrl = 0.3f;
+    const float before_wide = PitchCtrl.spd_pid.Iout;
+    unitPID_calc();
+    assert(!pitch_control_debug.integral_separated);
+    assert(PitchCtrl.spd_pid.Iout > before_wide);
+    pitch_i_separation_rad = PITCH_I_SEPARATION_RAD_DEFAULT;
+
+    puts("PASS: defaults match baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
 }
 '''
 (out / 'test.c').write_text(prefix + declarations + functions + tests, encoding='utf-8')

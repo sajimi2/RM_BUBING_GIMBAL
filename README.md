@@ -58,6 +58,8 @@ Pitch 输出与基线逐周期一致，由宿主测试验证：
 
 - 速度环积分 `PITCH_SPD_KI = 0`。积分按实际控制周期折算，0 ms 或超过 10 ms 的间隔不积分；
   总输出饱和时不再往同方向积分；无力或遥控掉线时清空 Pitch 双环。
+  角度误差超过 `pitch_i_separation_rad`（默认 0.1 rad）时暂停积分并保留已有积分，
+  防止大角度转动中积分攒满造成超调。这个阈值必须大于 Ki=0 时观察到的静差，否则积分不会介入。
 - 重力前馈 `u_g = gain × cos(INS Pitch + offset_rad)`，默认 `gain = 0`。前馈单独限幅 3000，
   每秒最多变化 6000，与 PID 输出相加后统一限幅 ±30000。
 
@@ -67,9 +69,10 @@ Pitch 输出与基线逐周期一致，由宿主测试验证：
 | --- | --- |
 | `PitchCtrl.spd_pid.Ki` | 速度环积分系数（每 2 ms 的单位） |
 | `pitch_gravity_config.gain` / `.offset_rad` | 重力前馈幅值 / 角度偏移（rad） |
+| `pitch_i_separation_rad` | 积分分离阈值（rad） |
 
 `pitch_control_debug` 每个控制周期刷新，只供观察：目标与实际角度、误差、P/I/D 分项、
 前馈、限幅前后总输出、实际 CAN 给定 `motor_cmd`，以及目标限幅、积分限幅、输出饱和、
-积分被阻止、前馈限幅等标志。除 `motor_cmd` 外，输出量都是 PID 内部方向，CAN 给定再取反。
+积分被阻止、积分分离、前馈限幅等标志。除 `motor_cmd` 外，输出量都是 PID 内部方向，CAN 给定再取反。
 
 宿主测试（需要 gcc）：`python -X utf8 tests/host/test_pitch_integral.py`。

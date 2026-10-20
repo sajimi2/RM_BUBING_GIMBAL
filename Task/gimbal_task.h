@@ -46,12 +46,15 @@ typedef struct
     uint8_t pid_saturated;          // P+I+D达到或超过输出上限
     uint8_t total_saturated;        // 加入补偿后达到或超过输出上限
     uint8_t integral_blocked;       // 本次积分加重总输出超限，已撤销
+    uint8_t integral_separated;     // 角度误差超过分离阈值，本周期暂停积分
     uint8_t gravity_limited;        // 公式算出的补偿超过补偿自身上限
     uint8_t gravity_config_invalid; // 补偿参数或当前角度无效，已撤掉补偿
 } pitch_control_debug_t;
 
 extern volatile pitch_gravity_config_t pitch_gravity_config;
 extern volatile pitch_control_debug_t pitch_control_debug;
+/* 积分分离阈值（rad）：角度误差超过它时暂停积分，可在调试器里修改。 */
+extern volatile fp32 pitch_i_separation_rad;
 
 void gimbal_task(void const *pvParameters);
 extern const struct GimbalMotorCtrl_s* get_wantedyaw_point(void);

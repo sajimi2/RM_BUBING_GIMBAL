@@ -38,6 +38,9 @@
 #define PITCH_SPD_KD 1000.0f
 /* 启动延时或调试暂停后不补算长时间积分，正常抖动按实际经过时间折算。 */
 #define PITCH_I_MAX_DT_MS 10U
+/* 积分分离：角度误差超过此值时暂停积分并保留已有积分，防止大角度转动中积分攒满造成超调。
+ * 必须大于 Ki=0 时观察到的静差，否则积分永远不会介入。单位 rad，约 5.7°。 */
+#define PITCH_I_SEPARATION_RAD_DEFAULT 0.1f
 
 #define YAW_SPD_KP 10000000.0f
 #define YAW_SPD_KI 0	
@@ -167,6 +170,7 @@ volatile pitch_gravity_config_t pitch_gravity_config = {
     PITCH_GRAVITY_OFFSET_DEFAULT
 };
 volatile pitch_control_debug_t pitch_control_debug;
+volatile fp32 pitch_i_separation_rad = PITCH_I_SEPARATION_RAD_DEFAULT; // 可在调试器里修改
 static fp32 pitch_gravity_output; // 上一周期的补偿，用于限制本周期的变化速度
 
 // PID参数数组
@@ -630,6 +634,7 @@ static fp32 limitPitchOutput(fp32 gravityOut, fp32 lastIout, pitch_control_debug
  *
  * 保留原 P/D 与速度死区；不改变其他轴的 PID_calc。
  * Ki 沿用每 2 ms 一次的参数单位，按控制环时间缩放，与视觉收包次数无关。
+ * 角度误差超过 pitch_i_separation_rad 时暂停积分，已有积分保留。
  */
 static fp32 pitch_speed_pid_calc(fp32 gravity_out, pitch_control_debug_t *debug)
 {
@@ -637,8 +642,11 @@ static fp32 pitch_speed_pid_calc(fp32 gravity_out, pitch_control_debug_t *debug)
     const fp32 previous_i = pid->Iout;
     const fp32 nominal_ki = pid->Ki;
     const uint32_t dt_ms = PitchCtrl.nowTime - PitchCtrl.lastTime;
+    // 本周期角度环误差，gimbal_PID_calc 已归一化到 [-PI, PI]
+    const uint8_t separated = fabsf(PitchCtrl.agl_pid.error[0]) > pitch_i_separation_rad;
 
-    pid->Ki = (dt_ms > 0U && dt_ms <= PITCH_I_MAX_DT_MS)
+    debug->integral_separated = separated;
+    pid->Ki = (dt_ms > 0U && dt_ms <= PITCH_I_MAX_DT_MS && !separated)
                   ? nominal_ki * (fp32)dt_ms / GIMBAL_TASK_CTRL_TIME
                   : 0.0f;
     PID_calc(pid, PitchCtrl.radspeed, PitchCtrl.agl_pid.out);
