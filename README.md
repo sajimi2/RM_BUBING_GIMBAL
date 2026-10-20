@@ -75,4 +75,28 @@ Pitch 输出与基线逐周期一致，由宿主测试验证：
 前馈、限幅前后总输出、实际 CAN 给定 `motor_cmd`，以及目标限幅、积分限幅、输出饱和、
 积分被阻止、积分分离、前馈限幅等标志。除 `motor_cmd` 外，输出量都是 PID 内部方向，CAN 给定再取反。
 
-宿主测试（需要 gcc）：`python -X utf8 tests/host/test_pitch_integral.py`。
+### 重力前馈标定
+
+不需要开积分。手动模式把 Pitch 停在若干角度（低头、水平、抬头，范围尽量大），
+等 `speed_rad_s` 接近 0 后记录 `actual_angle_rad` 和 `total_out`。静止时 D 项约为 0，
+`total_out` 就是托住云台需要的输出，单位和方向都与前馈相同。静摩擦会让保持输出落在一个区间里，
+每个角度最好从上方、下方各停一次。然后：
+
+```powershell
+python tools/fit_pitch_gravity.py samples.csv          # 两列：angle_rad,total_out
+python tools/fit_pitch_gravity.py -0.3,-1850 0,-2100 0.4,-1900
+```
+
+脚本输出带符号的 `gain` 和 `offset_rad`，以及每点残差。先在调试器里填入
+`pitch_gravity_config` 验证：填对后各角度的静差应明显变小。确认后写回
+`PITCH_GRAVITY_GAIN_DEFAULT` / `PITCH_GRAVITY_OFFSET_DEFAULT`。
+`|gain|` 超过 3000 时要先调大 `PITCH_GRAVITY_MAX_OUT`。前馈打开后用同样方法采样可以复标。
+
+### 建议的上车顺序
+
+1. 烧录本版本，不改任何参数：行为应与基线一致，只多了 `pitch_control_debug` 可看。
+2. 采样并拟合，只打开重力前馈，观察 Pitch 静差和自瞄效果。
+3. 如仍有静差，再单独打开 `Ki`，从小值开始；观察 `integral_separated` 和超调。
+
+宿主测试（需要 gcc）：`python -X utf8 tests/host/test_pitch_integral.py`、
+`python -X utf8 tests/host/test_fit_pitch_gravity.py`。
