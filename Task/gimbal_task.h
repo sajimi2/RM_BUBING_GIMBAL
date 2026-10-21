@@ -32,10 +32,11 @@ typedef struct
     fp32 d_out;
     fp32 pid_unclamped_out;   // P+I+D，尚未做PID总输出限幅
 
-    // 重力补偿与合成输出
+    // 静摩擦补偿、重力补偿与合成输出
+    fp32 friction_out;        // 静摩擦补偿补上的差额，不补时为0
     fp32 gravity_target_out;  // 公式计算后、已限幅的目标补偿
     fp32 gravity_out;         // 限制变化速度后，本周期实际采用的补偿
-    fp32 total_unclamped_out; // P+I+D+重力补偿，尚未做总输出限幅
+    fp32 total_unclamped_out; // P+I+D+静摩擦补偿+重力补偿，尚未做总输出限幅
     fp32 total_out;           // 总输出限幅后的结果
     int16_t motor_cmd;        // total_out取反并转为整数后的电机指令
 
@@ -49,12 +50,18 @@ typedef struct
     uint8_t integral_separated;     // 角度误差超过分离阈值，本周期暂停积分
     uint8_t gravity_limited;        // 公式算出的补偿超过补偿自身上限
     uint8_t gravity_config_invalid; // 补偿参数或当前角度无效，已撤掉补偿
+    uint8_t friction_still;         // 已确认停住（转速为0且角度不漂，连续满100 ms）
+    uint8_t friction_active;        // 本周期静摩擦补偿生效
 } pitch_control_debug_t;
 
 extern volatile pitch_gravity_config_t pitch_gravity_config;
 extern volatile pitch_control_debug_t pitch_control_debug;
 /* 积分分离阈值（rad）：角度误差超过它时暂停积分，可在调试器里修改。 */
 extern volatile fp32 pitch_i_separation_rad;
+/* 静摩擦补偿：抬头/低头门槛（PID输出不到门槛时补到门槛，0为关闭）、死区（rad）。 */
+extern volatile fp32 pitch_friction_up_out;
+extern volatile fp32 pitch_friction_down_out;
+extern volatile fp32 pitch_friction_error_rad;
 
 /* 调参任务读取一致的快照；不会把调试结构体作为控制输入。 */
 typedef struct

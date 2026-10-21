@@ -26,6 +26,7 @@ STATE_FIELDS = (
 FLAG_FIELDS = (
     "control_enabled", "target_limited", "integral_limited", "pid_saturated", "total_saturated",
     "integral_blocked", "integral_separated", "gravity_limited", "gravity_config_invalid",
+    "friction_still", "friction_active",
 )
 
 

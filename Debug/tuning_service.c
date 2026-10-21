@@ -104,7 +104,8 @@ void tuning_service_state(tuning_message_t *message)
         ((c->target_limited != 0U) << 1) | ((c->integral_limited != 0U) << 2) |
         ((c->pid_saturated != 0U) << 3) | ((c->total_saturated != 0U) << 4) |
         ((c->integral_blocked != 0U) << 5) | ((c->integral_separated != 0U) << 6) |
-        ((c->gravity_limited != 0U) << 7) | ((c->gravity_config_invalid != 0U) << 8));
+        ((c->gravity_limited != 0U) << 7) | ((c->gravity_config_invalid != 0U) << 8) |
+        ((c->friction_still != 0U) << 9) | ((c->friction_active != 0U) << 10));
     message->payload[0] = TUNING_OK;
     tuning_write_u32(message->payload + 1, state.tick_ms);
     message->payload[5] = state.source;

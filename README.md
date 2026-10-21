@@ -2,7 +2,7 @@
 
 双击根目录的 **`打开云台调参台.cmd`**，可在图形界面里连接串口、在线调重力参数和 Pitch 速度环 Ki、模拟 Pitch 视觉目标、查看曲线并导出 CSV。先烧录并运行当前固件；使用说明见 [SERIAL_TUNING.md](SERIAL_TUNING.md)。
 
-当前阶段为双环 PID + 重力补偿，默认 Ki=6000、Gain=2500、Offset=1.16 rad。串口上车对照记录、检查范围和后续真实视觉测试顺序见 [2026-10-21 阶段存档](docs/checkpoints/2026-10-21-pitch-pid-gravity.md)。尚未加入专门的 Pitch 摩擦补偿项。
+当前阶段为双环 PID + 重力补偿，默认 Ki=6000、Gain=2500、Offset=1.16 rad。串口上车对照记录、检查范围和后续真实视觉测试顺序见 [2026-10-21 阶段存档](docs/checkpoints/2026-10-21-pitch-pid-gravity.md)。Pitch 静摩擦补偿（启动补足）的代码已加入，默认关闭，见下文“Pitch 静摩擦补偿”。
 
 步兵云台 C 板固件，STM32F407IGHx + FreeRTOS。最初恢复的历史基线及其来源见 `BASELINE.md`。
 
@@ -105,6 +105,29 @@ python tools/fit_pitch_gravity.py -0.3,-1850 0,-2100 0.4,-1900
 1. 烧录本版本，不改任何参数：行为应与基线一致，只多了 `pitch_control_debug` 可看。
 2. 采样并拟合，只打开重力前馈，观察 Pitch 静差和自瞄效果。
 3. 如仍有静差，再单独打开 `Ki`，从小值开始；观察 `integral_separated` 和超调。
+
+## Pitch 静摩擦补偿（启动补足，默认关闭）
+
+解决“停在离目标一段距离处，靠积分慢慢拉回”。只在下面几条**全部满足**时生效：
+
+1. 已确认停住：Pitch 6020 反馈转速为 0，且角度离计时起点不超过 0.1°，连续满 100 ms。
+   转动或漂移超出就从当前时刻重新计时，所以一转起来补偿立刻退出；
+2. 离目标超过 `pitch_friction_error_rad`（默认 0.0087 rad ≈ 0.5°），目标附近不补，避免来回顶；
+3. 位置环要的速度、速度环 PID 输出都指向目标；PID 在刹车（方向相反）不补；
+4. PID 输出（P+I+D，不含重力前馈）的大小还没到门槛。
+
+补法是**补到门槛**，不是加门槛：PID 已有 600、门槛 750，只补 150；PID 已超过门槛就不补。
+补偿不写进积分，加在总输出上后仍执行原总输出限幅。门槛填 0、负数、非数或超过 5000 都按关闭处理。
+
+| 变量 | 作用 |
+| --- | --- |
+| `pitch_friction_up_out` | 抬头方向门槛（PID 内部方向为正），默认 0 = 关闭 |
+| `pitch_friction_down_out` | 低头方向门槛（填正数），默认 0 = 关闭 |
+| `pitch_friction_error_rad` | 死区，单位 rad |
+
+观察：`pitch_control_debug.friction_out` 是本周期补的差额，`friction_still` 表示已确认停住，
+`friction_active` 表示本周期补偿生效。串口 CSV 里这两个标志也有，差额可用
+`total_unclamped_out - pid_unclamped_out - gravity_out` 算出。确认合适后写回 `PITCH_FRICTION_*_DEFAULT`。
 
 宿主测试（需要 gcc）：`python -X utf8 tests/host/test_pitch_integral.py`、
 `python -X utf8 tests/host/test_fit_pitch_gravity.py`。

@@ -148,7 +148,7 @@ HELLO 的 6 个 float 顺序为 Pitch 最小/最大角、gain 最大绝对值、
 
 15 个 float 顺序：gain、offset、requested_angle、target_angle、actual_angle、speed、angle_error、P、I、D、pid_unclamped、gravity_target、gravity_out、total_unclamped、total_out。角度 rad，速度 rad/s，其余控制输出为原 PID 刻度。
 
-flags 从 bit0 起依次为 control_enabled、target_limited、integral_limited、pid_saturated、total_saturated、integral_blocked、integral_separated、gravity_limited、gravity_config_invalid。
+flags 从 bit0 起依次为 control_enabled、target_limited、integral_limited、pid_saturated、total_saturated、integral_blocked、integral_separated、gravity_limited、gravity_config_invalid、friction_still、friction_active。静摩擦补偿的差额没有单独字段，等于 total_unclamped − pid_unclamped − gravity_out。
 
 状态码：0 成功；1 未知命令；2 长度错误；3 参数不存在/重复/字段非法；4 超范围或非有限数；5 未满足遥控自瞄条件；6 未选择串口来源。
 

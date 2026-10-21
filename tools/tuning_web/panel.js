@@ -156,7 +156,9 @@ function render() {
       badge(s.automatic ? '自瞄条件满足' : '未进入自瞄', s.automatic ? 'good' : 'warn'),
       ...[['target_limited','目标角限幅'],['pid_saturated','PID 限幅'],['total_saturated','总输出限幅'],
         ['integral_limited','积分限幅'],['integral_blocked','积分被阻止'],['integral_separated','积分分离'],
-        ['gravity_limited','重力补偿限幅'],['gravity_config_invalid','重力配置无效']].map(([key, title]) => badge(title + (s[key] ? '：是' : '：否'), s[key] ? 'bad' : ''))
+        ['gravity_limited','重力补偿限幅'],['gravity_config_invalid','重力配置无效']].map(([key, title]) => badge(title + (s[key] ? '：是' : '：否'), s[key] ? 'bad' : '')),
+      badge(s.friction_still ? '已确认停住' : '未确认停住', ''),
+      badge(s.friction_active ? '静摩擦补偿：生效' : '静摩擦补偿：未生效', s.friction_active ? 'warn' : '')
     );
   }
   $('gate-hint').textContent = !connected ? '需先连接设备，再通过遥控器进入自瞄。' : !current ? '读数未刷新，暂不允许发送目标。' : !gates() ? '请打开遥控器、解除无力并进入自瞄。' : s.source === 1 ? '串口模拟中；填入绝对目标，再点击发送。' : '自瞄条件满足，可以开始串口模拟。';

@@ -21,7 +21,7 @@ source = (root / 'Task/gimbal_task.c').read_text(encoding='utf-8-sig')
 
 def function(name):
     # 直接编译工程中的函数体，避免在测试中另写一份控制算法。
-    match = re.search(r'^(?:static )?(?:fp32|void) ' + name +
+    match = re.search(r'^(?:static )?(?:fp32|void|uint8_t) ' + name +
                       r'\([^;]*?\)\s*(?://[^\n]*\n\s*)?\{', source, re.MULTILINE)
     if not match:
         raise AssertionError('找不到函数定义：' + name)
@@ -51,6 +51,7 @@ declarations = source[source.index('#define GIMBAL_TASK_CTRL_TIME'):
                       source.index('// 模式相关')]
 functions = '\n'.join(function(name) for name in (
     'radFormat', 'gimbal_PID_calc', 'calcPitchGravity',
+    'restartPitchStillTimer', 'isPitchStill', 'checkFrictionThreshold', 'calcPitchFriction',
     'limitPitchOutput', 'pitch_speed_pid_calc', 'unitPID_calc'))
 tests = r'''
 static void near_value_at(float a, float b, int line)
@@ -62,6 +63,8 @@ static void near_value_at(float a, float b, int line)
 
 #define TEST_KI 8000.0f /* 仅用于验证积分路径，不是工程默认值 */
 
+static int16_t test_pitch_rpm; /* 模拟 Pitch 6020 的整数 rpm 反馈 */
+
 static void setup_default(void)
 {
     memset(&PitchCtrl, 0, sizeof(PitchCtrl));
@@ -70,6 +73,13 @@ static void setup_default(void)
     pitch_gravity_config.gain = 0;
     pitch_gravity_config.offset_rad = 0;
     pitch_gravity_output = 0;
+    /* 摩擦补偿保持工程默认（门槛0=关闭），基线用例在补偿代码运行时验证输出不变。 */
+    pitch_friction_up_out = PITCH_FRICTION_UP_OUT_DEFAULT;
+    pitch_friction_down_out = PITCH_FRICTION_DOWN_OUT_DEFAULT;
+    pitch_friction_error_rad = PITCH_FRICTION_ERROR_RAD_DEFAULT;
+    pitch_still_valid = 0;
+    test_pitch_rpm = 0;
+    PitchCtrl.SpeedRpmPoint = &test_pitch_rpm;
     rc_online = 1;
     PID_init(&PitchCtrl.spd_pid, PID_POSITION, pitchSpdPIDco,
              PITCH_VOLT_MAX_OUT, PITCH_VOLT_MAX_IOUT);
@@ -102,6 +112,183 @@ static float integrate_for_ms(uint32_t period_ms, int duration_ms)
         unitPID_calc();
     near_value(PitchCtrl.spd_pid.Ki, TEST_KI);
     return PitchCtrl.spd_pid.Iout;
+}
+
+/* 按 2 ms 周期推进时间，运行若干毫秒。 */
+static void run_ms(int duration_ms)
+{
+    for (int t = 0; t < duration_ms; t += 2) {
+        PitchCtrl.lastTime = PitchCtrl.nowTime;
+        PitchCtrl.nowTime += 2;
+        unitPID_calc();
+    }
+}
+
+/* 摩擦补偿用例：只留速度环 P，目标误差 err 时 PID 输出 = 4e6 * 0.015 * err。 */
+static void setup_friction(float error_rad)
+{
+    setup_default();
+    PitchCtrl.agl_pid.Kd = 0;
+    PitchCtrl.spd_pid.Kd = 0;
+    pitch_friction_up_out = 750;
+    pitch_friction_down_out = 1000;
+    PitchCtrl.want_AbsoluteAngleCtrl = error_rad;
+}
+
+static void friction_tests(void)
+{
+    /* 必须连续静止满 100 ms 才补；补的是差额：PID 600、门槛 750，只补 150。 */
+    setup_friction(0.01f);
+    run_ms(98);
+    assert(!pitch_control_debug.friction_still && !pitch_control_debug.friction_active);
+    near_value(pitch_control_debug.friction_out, 0);
+    near_value(pitch_control_debug.total_out, 600);
+    run_ms(4);
+    assert(pitch_control_debug.friction_still && pitch_control_debug.friction_active);
+    near_value(pitch_control_debug.pid_unclamped_out, 600);
+    near_value(pitch_control_debug.friction_out, 150);
+    near_value(pitch_control_debug.total_out, 750);
+    assert(PitchCtrl.Volt_out == -750);
+
+    /* 补偿与重力前馈叠加：门槛只约束 PID 部分，重力照常加上。 */
+    setup_friction(0.01f);
+    pitch_gravity_config.gain = 300;
+    run_ms(200);
+    near_value(pitch_control_debug.friction_out, 150);
+    near_value(pitch_control_debug.total_out, 750 + 300);
+
+    /* 低头方向用自己的门槛：PID -600、门槛 1000，补 -400。 */
+    setup_friction(-0.01f);
+    run_ms(200);
+    assert(pitch_control_debug.friction_active);
+    near_value(pitch_control_debug.friction_out, -400);
+    near_value(pitch_control_debug.total_out, -1000);
+
+    /* 目标附近死区内（0.005 rad < 0.0087 rad）停住也不补。 */
+    setup_friction(0.005f);
+    run_ms(200);
+    assert(pitch_control_debug.friction_still && !pitch_control_debug.friction_active);
+    near_value(pitch_control_debug.friction_out, 0);
+    /* 死区可在运行时改小。 */
+    pitch_friction_error_rad = 0.004f;
+    run_ms(2);
+    assert(pitch_control_debug.friction_active);
+    near_value(pitch_control_debug.total_out, 750);
+
+    /* PID 已超过门槛：不补，也不会把输出拉低到门槛。 */
+    setup_friction(0.02f);
+    run_ms(200);
+    assert(!pitch_control_debug.friction_active);
+    near_value(pitch_control_debug.total_out, 1200);
+
+    /* PID 与目标方向相反（在刹车）：不补。 */
+    setup_friction(0.01f);
+    PitchCtrl.radspeed = 0.0004f; /* 速度环误差 0.00015-0.0004，PID = -1000 */
+    run_ms(200);
+    assert(pitch_control_debug.friction_still && !pitch_control_debug.friction_active);
+    near_value(pitch_control_debug.total_out, -1000);
+
+    /* 位置环要的速度方向与误差方向不一致（例如角度环 D 项反向）：不补。 */
+    setup_friction(0.01f);
+    run_ms(200);
+    {
+        pitch_control_debug_t check = {0};
+        PitchCtrl.agl_pid.error[0] = 0.01f;
+        PitchCtrl.agl_pid.out = 0.0001f;
+        near_value(calcPitchFriction(600, &check), 150);
+        PitchCtrl.agl_pid.out = -0.0001f;
+        near_value(calcPitchFriction(600, &check), 0);
+        PitchCtrl.agl_pid.error[0] = -0.01f;
+        PitchCtrl.agl_pid.out = -0.0001f;
+        near_value(calcPitchFriction(-600, &check), -400);
+        near_value(calcPitchFriction(200, &check), 0); /* 低头时 PID 在往上推（刹车）：不补 */
+        PitchCtrl.agl_pid.out = 0.0001f;
+        near_value(calcPitchFriction(-600, &check), 0);
+    }
+
+    /* 转起来立即退出补偿；再次停住要重新等满 100 ms。 */
+    setup_friction(0.01f);
+    run_ms(200);
+    assert(pitch_control_debug.friction_active);
+    test_pitch_rpm = 1;
+    run_ms(2);
+    assert(!pitch_control_debug.friction_still && !pitch_control_debug.friction_active);
+    near_value(pitch_control_debug.total_out, 600);
+    test_pitch_rpm = 0;
+    run_ms(98);
+    assert(!pitch_control_debug.friction_active);
+    run_ms(4);
+    assert(pitch_control_debug.friction_active);
+
+    /* rpm 读数为 0 但角度蠕动超过 0.1°：视为在动，重新计时。 */
+    setup_friction(0.01f);
+    run_ms(200);
+    PitchCtrl.nowAbsoluteAngle = 0.002f;
+    PitchCtrl.want_AbsoluteAngleCtrl = 0.012f; /* 误差不变，只验证静止判断 */
+    run_ms(2);
+    assert(!pitch_control_debug.friction_active);
+    run_ms(98);
+    assert(!pitch_control_debug.friction_active);
+    run_ms(4);
+    assert(pitch_control_debug.friction_active);
+    /* 漂移不超过 0.1° 时不重新计时。 */
+    PitchCtrl.nowAbsoluteAngle = 0.0035f;
+    PitchCtrl.want_AbsoluteAngleCtrl = 0.0135f;
+    run_ms(2);
+    assert(pitch_control_debug.friction_active);
+
+    /* 补偿不写进积分：同样的过程，开和关补偿积分完全相同。 */
+    float integral_with[2];
+    for (int on = 0; on <= 1; ++on) {
+        setup_friction(0.01f);
+        PitchCtrl.spd_pid.Ki = TEST_KI;
+        PitchCtrl.spd_pid.max_iout = 10;  /* 积分很小，保持 PID 在门槛以下 */
+        if (!on) pitch_friction_up_out = 0;
+        run_ms(300);
+        assert(pitch_control_debug.friction_active == on);
+        integral_with[on] = PitchCtrl.spd_pid.Iout;
+    }
+    near_value(integral_with[0], integral_with[1]);
+
+    /* 门槛或死区填错（NaN、负数、超过上限）都按关闭处理。 */
+    const float bad_values[] = {NAN, INFINITY, -750, PITCH_FRICTION_MAX_OUT + 1};
+    for (int i = 0; i < 4; ++i) {
+        setup_friction(0.01f);
+        pitch_friction_up_out = bad_values[i];
+        run_ms(200);
+        assert(!pitch_control_debug.friction_active);
+        near_value(pitch_control_debug.total_out, 600);
+    }
+    setup_friction(0.01f);
+    pitch_friction_up_out = PITCH_FRICTION_MAX_OUT;
+    run_ms(200);
+    near_value(pitch_control_debug.total_out, PITCH_FRICTION_MAX_OUT);
+    for (int i = 0; i < 3; ++i) {
+        setup_friction(0.01f);
+        pitch_friction_error_rad = bad_values[i];
+        run_ms(200);
+        assert(!pitch_control_debug.friction_active);
+    }
+
+    /* 没有转速反馈指针：无法确认停住，不补。 */
+    setup_friction(0.01f);
+    PitchCtrl.SpeedRpmPoint = NULL;
+    run_ms(200);
+    assert(!pitch_control_debug.friction_still && !pitch_control_debug.friction_active);
+
+    /* 无力后恢复：静止计时清零，要重新等满 100 ms。 */
+    setup_friction(0.01f);
+    run_ms(200);
+    assert(pitch_control_debug.friction_active);
+    PitchCtrl.nopowerflag = 1;
+    run_ms(2);
+    near_value(pitch_control_debug.friction_out, 0);
+    assert(PitchCtrl.Volt_out == 0);
+    PitchCtrl.nopowerflag = 0;
+    run_ms(98);
+    assert(!pitch_control_debug.friction_active);
+    run_ms(4);
+    assert(pitch_control_debug.friction_active);
 }
 
 int main(void)
@@ -373,7 +560,9 @@ int main(void)
     assert(PitchCtrl.spd_pid.Iout > before_wide);
     pitch_i_separation_rad = PITCH_I_SEPARATION_RAD_DEFAULT;
 
-    puts("PASS: compensation-off matches baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
+    friction_tests();
+
+    puts("PASS: static friction fill-to-threshold; compensation-off matches baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
 }
 '''
 (out / 'test.c').write_text(prefix + declarations + functions + tests, encoding='utf-8')
