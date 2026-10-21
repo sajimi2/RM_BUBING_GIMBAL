@@ -22,6 +22,7 @@ class FixtureLink:
         self.calls = []
         self.closed = False
         self.fail = False
+        self.legacy = False
         self.values = {key: 0.0 for key in STATE_FIELDS}
         self.values.update({key: False for key in FLAG_FIELDS})
         self.values.update(gain=-800.0, target_angle_rad=0.04, requested_angle_rad=0.04,
@@ -31,12 +32,13 @@ class FixtureLink:
                            rc_online=1, automatic=1, control_enabled=True, source=0, tick_ms=1234)
 
     def hello(self):
-        return dict(protocol=1, parameter_count=2, device='gimbal-pitch', pitch_min_rad=-0.45,
+        return dict(protocol=1, parameter_count=2 if self.legacy else 3, device='gimbal-pitch', pitch_min_rad=-0.45,
                     pitch_max_rad=0.7, gain_max=5000.0, offset_max_rad=math.pi,
                     gravity_max_out=5000.0, total_max_out=24000.0)
 
     def parameters(self):
-        return [dict(id=1, name='pitch.gravity.gain'), dict(id=2, name='pitch.gravity.offset')]
+        gravity = [dict(id=1, name='pitch.gravity.gain'), dict(id=2, name='pitch.gravity.offset')]
+        return gravity if self.legacy else gravity + [dict(id=3, name='pitch.speed.ki', minimum=0, maximum=8000, step=100)]
 
     def state(self):
         if self.fail:
@@ -45,7 +47,10 @@ class FixtureLink:
 
     def set_parameters(self, values):
         self.calls.append(('parameters', dict(values)))
-        self.values.update(gain=values[1], offset_rad=values[2])
+        for identifier, value in values.items():
+            self.values[{1:'gain', 2:'offset_rad', 3:'speed_ki'}[identifier]] = value
+        if values.get(3) == 0:
+            self.values['i_out'] = 0
         return dict(values)
 
     def select_source(self, uart):
@@ -101,6 +106,45 @@ class PanelTests(unittest.TestCase):
                        dict(gain=0, offset_deg=181), dict(gain=True, offset_deg=0)):
             self.assertFalse(wait_job(self.panel, 'parameters', **values)['ok'])
         self.assertEqual(len(self.fixture.calls), count)
+
+    def test_ki_write_is_independent_validated_read_back_and_recorded(self):
+        self.connect()
+        self.fixture.values['i_out'] = 321
+        self.assertTrue(wait_job(self.panel, 'ki', speed_ki=500)['ok'])
+        self.assertEqual(self.fixture.calls, [('parameters', {3:500})])
+        self.assertEqual(self.panel.view()['state']['speed_ki'], 500)
+        self.assertEqual(self.panel.view()['state']['i_out'], 321)
+        self.assertEqual(self.panel.view()['state']['gain'], -800)
+        self.assertEqual(self.panel.view()['state']['offset_rad'], 0)
+        for value in (-1, 8001, float('nan'), float('inf'), True, '500', None):
+            self.assertFalse(wait_job(self.panel, 'ki', speed_ki=value)['ok'])
+        self.assertEqual(len(self.fixture.calls), 1)
+        self.assertTrue(wait_job(self.panel, 'record_start')['ok'])
+        self.assertTrue(wait_job(self.panel, 'read')['ok'])
+        self.assertTrue(wait_job(self.panel, 'record_stop')['ok'])
+        rows = list(csv.DictReader(io.StringIO(self.panel.csv().lstrip('\ufeff'))))
+        self.assertTrue(all(float(row['speed_ki']) == 500 for row in rows))
+        self.assertTrue(wait_job(self.panel, 'ki', speed_ki=0)['ok'])
+        self.assertEqual(self.panel.view()['state']['i_out'], 0)
+        self.assertEqual(self.panel.view()['state']['speed_ki'], 0)
+        self.assertEqual(self.panel.view()['state']['source'], 0)
+
+    def test_legacy_firmware_can_connect_but_cannot_write_ki(self):
+        self.fixture.legacy = True
+        self.connect()
+        result = wait_job(self.panel, 'ki', speed_ki=500)
+        self.assertFalse(result['ok'])
+        self.assertIn('烧录新版', result['error'])
+        self.assertEqual(self.fixture.calls, [])
+        self.assertTrue(self.panel.view()['connected'])
+
+    def test_ki_readback_mismatch_is_not_reported_as_success(self):
+        self.connect()
+        self.fixture.set_parameters = lambda values: dict(values)
+        result = wait_job(self.panel, 'ki', speed_ki=500)
+        self.assertFalse(result['ok'])
+        self.assertIn('读回值不同', result['error'])
+        self.assertEqual(self.panel.view()['state']['speed_ki'], 0)
 
     def test_zero_restore_and_uart_gates(self):
         self.connect()

@@ -76,11 +76,14 @@ typedef struct
     fp32 offset_max_rad;
     fp32 gravity_max_out;
     fp32 total_max_out;
+    fp32 speed_ki_max;
 } pitch_tuning_limits_t;
 
 void gimbal_tuning_get_state(pitch_tuning_state_t *state);
 void gimbal_tuning_get_limits(pitch_tuning_limits_t *limits);
 uint8_t gimbal_tuning_set_gravity(fp32 gain, fp32 offset_rad);
+/* 整组检查后原子写入；Ki=0 同时清零 I 项，非零 Ki 保留已有 I 项。 */
+uint8_t gimbal_tuning_set_parameters(fp32 gain, fp32 offset_rad, fp32 speed_ki);
 uint8_t gimbal_tuning_set_source(uint8_t source);
 uint8_t gimbal_tuning_submit_vision(const uint8_t payload[8]);
 

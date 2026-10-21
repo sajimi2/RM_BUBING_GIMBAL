@@ -36,6 +36,16 @@
         <p class="hint">只修改 RAM；重启恢复固件默认值。先固定 Offset，只调整 Gain 做对照。</p>
       </section>
       <section class="card">
+        <div class="heading"><h2>Pitch 速度环积分</h2><span id="ki-state" class="muted small">等待板端读回</span></div>
+        <label for="ki-input">积分增益 <span>Ki · 沿用固件每 2 ms 的参数单位</span></label>
+        <div class="stepper"><button id="ki-down" aria-label="Ki 减少100">−100</button><input id="ki-input" type="number" min="0" step="100" placeholder="连接后读回"><button id="ki-up" aria-label="Ki 增加100">+100</button></div>
+        <div class="readback">板端读回 <strong id="ki-current">—</strong><span>输入不会立即下发</span></div>
+        <button id="ki-apply" class="primary full" disabled>应用 Ki 并读回</button>
+        <button id="ki-zero" class="quiet full" disabled>关闭积分并清零 I 项</button>
+        <p id="ki-support" class="hint">连接后读取 Ki 的允许范围。</p>
+        <p class="hint">只修改 RAM。非零 Ki 保留当前 I 输出，只改变后续积累速度；Ki=0 同时清零 I 项。CSV 自动记录实际 Ki。</p>
+      </section>
+      <section class="card">
         <div class="heading"><h2>模拟视觉目标</h2><span id="source-badge" class="badge">来源未知</span></div>
         <button id="uart" class="full" disabled>开始串口模拟（保持当前角）</button>
         <button id="can" class="quiet full" disabled>恢复 CAN 视觉来源</button>
@@ -72,7 +82,7 @@
         <p class="hint">开始新记录会清空上一轮连续记录。需要保留的数据请先导出；上方实时曲线不清空。</p>
         <div class="separator"></div>
         <div class="heading tight"><span class="muted small">固定目标，等稳定后保存一组读数</span><button id="mark" disabled>保存当前对照</button></div>
-        <div class="table-scroll"><table><thead><tr><th>组</th><th>Gain</th><th>Offset °</th><th>目标 °</th><th>实际 °</th><th>误差 °</th><th>总输出限幅</th></tr></thead><tbody id="records"><tr><td colspan="7" class="empty">尚未保存对照</td></tr></tbody></table></div>
+        <div class="table-scroll"><table><thead><tr><th>组</th><th>Gain</th><th>Offset °</th><th>Ki</th><th>目标 °</th><th>实际 °</th><th>误差 °</th><th>总输出限幅</th></tr></thead><tbody id="records"><tr><td colspan="8" class="empty">尚未保存对照</td></tr></tbody></table></div>
         <button id="export-snapshots" class="quiet" disabled>导出对照 CSV</button>
         <p class="hint">记录保留在本次调参台进程中，退出前请导出。连续记录上限 18000 点，约 1 小时。</p>
       </section>

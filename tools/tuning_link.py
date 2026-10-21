@@ -170,8 +170,8 @@ class TuningLink:
         return struct.unpack_from("<f", data, 3)[0]
 
     def set_parameters(self, values: dict[int, float]) -> dict[int, float]:
-        if not 1 <= len(values) <= 2:
-            raise ValueError("本版每次可修改一至两个重力参数")
+        if not 1 <= len(values) <= 3:
+            raise ValueError("本版每次可修改一至三个调参参数")
         payload = bytes([len(values)]) + b"".join(struct.pack("<Hf", key, value) for key, value in values.items())
         reply = self.request(PARAM_SET, payload)
         if len(reply) != len(payload) + 1 or reply[1:] != payload:

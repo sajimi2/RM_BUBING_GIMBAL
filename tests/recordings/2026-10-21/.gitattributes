@@ -1,0 +1,2 @@
+# 原始记录按字节存档，避免 Git 换行转换改变 SHA-256。
+*.csv -text whitespace=cr-at-eol

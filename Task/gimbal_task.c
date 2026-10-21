@@ -33,9 +33,10 @@
 
 // 速度环PID参数
 #define PITCH_SPD_KP 4000000.0f
-/* 保持 0，与车上基线一致。积分路径已就绪，上车验证时在调试器里改
- * PitchCtrl.spd_pid.Ki；Ki 按每 2 ms 一次的单位，按实际控制周期折算。 */
-#define PITCH_SPD_KI 000.0f
+/* 上电积分增益；串口只修改运行值，重启恢复此值。
+ * Ki 按每 2 ms 一次的单位，按实际控制周期折算。 */
+#define PITCH_SPD_KI 6000.0f
+#define PITCH_SPD_KI_MAX 8000.0f // 串口实验范围上限，不代表已验证的稳定增益
 #define PITCH_SPD_KD 1000.0f
 /* 启动延时或调试暂停后不补算长时间积分，正常抖动按实际经过时间折算。 */
 #define PITCH_I_MAX_DT_MS 10U
@@ -63,8 +64,8 @@
 #define YAW_VOLT_MAX_IOUT 10000.0f
 
 // Pitch重力补偿参数，输出单位与速度环PID相同，幅值和方向需实车标定
-#define PITCH_GRAVITY_GAIN_DEFAULT    1200.0f    // 补偿幅值
-#define PITCH_GRAVITY_OFFSET_DEFAULT  0.0f    // 调整在哪个俯仰角的补偿最大，默认0=水平
+#define PITCH_GRAVITY_GAIN_DEFAULT    2500.0f    // 补偿幅值
+#define PITCH_GRAVITY_OFFSET_DEFAULT  1.16f    // 调整在哪个俯仰角的补偿最大，默认0=水平
 #define PITCH_GRAVITY_MAX_OUT         5000.0f // 补偿自身的输出限幅
 #define PITCH_GRAVITY_SLEW_PER_SECOND 20000.0f // 补偿每秒最多变化的控制量
 
@@ -573,6 +574,7 @@ void gimbal_tuning_get_limits(pitch_tuning_limits_t *limits)
     limits->offset_max_rad = PI;
     limits->gravity_max_out = PITCH_GRAVITY_MAX_OUT;
     limits->total_max_out = PITCH_VOLT_MAX_OUT;
+    limits->speed_ki_max = PITCH_SPD_KI_MAX;
 }
 
 uint8_t gimbal_tuning_set_gravity(fp32 gain, fp32 offset_rad)
@@ -587,6 +589,28 @@ uint8_t gimbal_tuning_set_gravity(fp32 gain, fp32 offset_rad)
     pitch_gravity_config.offset_rad = offset_rad;
     __set_PRIMASK(key);
     return TUNING_OK;
+}
+
+/* 串口任务低于云台任务优先级；临界区内一起提交，云台不会读到半组参数。
+ * 非零 Ki 只改变后续积分速度，保留已有 I 输出；Ki=0 明确撤掉已有积分。
+ */
+uint8_t gimbal_tuning_set_parameters(fp32 gain, fp32 offset_rad, fp32 speed_ki)
+{
+    uint32_t key;
+    uint8_t status;
+    if (!isfinite(speed_ki) || speed_ki < 0.0f || speed_ki > PITCH_SPD_KI_MAX)
+        return TUNING_OUT_OF_RANGE;
+    key = __get_PRIMASK();
+    __disable_irq();
+    status = gimbal_tuning_set_gravity(gain, offset_rad);
+    if (status == TUNING_OK)
+    {
+        PitchCtrl.spd_pid.Ki = speed_ki;
+        if (speed_ki == 0.0f)
+            PitchCtrl.spd_pid.Iout = 0.0f;
+    }
+    __set_PRIMASK(key);
+    return status;
 }
 
 uint8_t gimbal_tuning_set_source(uint8_t source)

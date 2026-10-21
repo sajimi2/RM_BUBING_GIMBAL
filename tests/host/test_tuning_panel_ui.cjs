@@ -23,6 +23,19 @@ const {chromium} = require(process.env.PLAYWRIGHT_CORE || path.join(root, 'build
     await waitText('connection-badge', '已连接 · TEST-PORT');
     await waitText('gain-current', '-800');
     await waitText('notice', '握手成功');
+    await waitText('ki-current', '0.00');
+    await page.locator('#ki-input').fill('500');
+    await waitText('ki-state', '输入待应用');
+    assert.equal(await page.locator('#ki-current').textContent(), '0.00');
+    await page.locator('#ki-apply').click();
+    await waitText('ki-current', '500.00');
+    assert.equal(await page.locator('#ki').textContent(), '500');
+    await page.locator('#ki-zero').click();
+    await waitText('ki-current', '0.00');
+    await page.locator('#ki-input').fill('500');
+    await page.locator('#ki-apply').click();
+    await waitText('ki-current', '500.00');
+    assert.equal(await page.locator('#gain-current').textContent(), '-800');
     assert(await page.locator('#send').isDisabled());
     await page.locator('#gain-down').click();
     assert.equal(await page.locator('#gain').inputValue(), '-900');
@@ -60,6 +73,9 @@ const {chromium} = require(process.env.PLAYWRIGHT_CORE || path.join(root, 'build
     await download.saveAs(csvPath);
     const csv = await fs.readFile(csvPath, 'utf8');
     assert(csv.includes('angle_error_rad') && csv.includes('TEST-PORT') && csv.includes('-900'));
+    const firstRows = csv.replace(/^\uFEFF/, '').trim().split(/\r?\n/).map(line => line.split(','));
+    const kiColumn = firstRows[0].indexOf('speed_ki');
+    assert(firstRows.slice(1).every(row => Number(row[kiColumn]) === 500));
     // 第二轮必须从空缓冲开始，上一轮的 -900 不得混进新 CSV。
     await page.locator('#gain').fill('-700');
     await page.locator('#apply').click();
@@ -85,8 +101,20 @@ const {chromium} = require(process.env.PLAYWRIGHT_CORE || path.join(root, 'build
     await waitText('notice', '本机服务未响应');
     assert(await page.locator('#send').isDisabled());
     assert(await page.locator('#apply').isDisabled());
+    assert(await page.locator('#ki-apply').isDisabled());
     await page.unroute('**/api/status*');
     await waitText('connection-badge', '已连接 · TEST-PORT');
+    // 旧固件仍能读原有参数，但 Ki 区域必须明确禁用。
+    await page.route('**/api/status*', async route => {
+      const response = await route.fetch(), data = await response.json();
+      data.parameters = data.parameters.filter(p => p.id !== 3);
+      await route.fulfill({response, json:data});
+    });
+    await waitText('ki-support', '烧录新版');
+    assert(await page.locator('#ki-apply').isDisabled());
+    assert(await page.locator('#ki-zero').isDisabled());
+    await page.unroute('**/api/status*');
+    await page.waitForFunction(() => !document.getElementById('ki-apply').disabled);
     await page.locator('#can').click();
     await waitText('source-badge', 'CAN 视觉');
     assert(await page.locator('#send').isDisabled());

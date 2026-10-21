@@ -1,8 +1,10 @@
 # BubinGimbalV1.0
 
-双击根目录的 **`打开云台调参台.cmd`**，可在图形界面里连接串口、在线调重力参数、模拟 Pitch 视觉目标、查看曲线并导出 CSV。先烧录并运行当前固件；使用说明见 [SERIAL_TUNING.md](SERIAL_TUNING.md)。界面已完成离线验收，实物串口和上车效果待验证。
+双击根目录的 **`打开云台调参台.cmd`**，可在图形界面里连接串口、在线调重力参数和 Pitch 速度环 Ki、模拟 Pitch 视觉目标、查看曲线并导出 CSV。先烧录并运行当前固件；使用说明见 [SERIAL_TUNING.md](SERIAL_TUNING.md)。
 
-步兵云台 C 板固件，STM32F407IGHx + FreeRTOS。车上烧录的基线及其来源见 `BASELINE.md`。
+当前阶段为双环 PID + 重力补偿，默认 Ki=6000、Gain=2500、Offset=1.16 rad。串口上车对照记录、检查范围和后续真实视觉测试顺序见 [2026-10-21 阶段存档](docs/checkpoints/2026-10-21-pitch-pid-gravity.md)。尚未加入专门的 Pitch 摩擦补偿项。
+
+步兵云台 C 板固件，STM32F407IGHx + FreeRTOS。最初恢复的历史基线及其来源见 `BASELINE.md`。
 
 ## 构建与烧录（VS Code + CMake）
 

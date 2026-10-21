@@ -31,6 +31,7 @@ function gates() {
   const s = view?.state;
   return fresh() && s?.rc_online && s?.automatic && s?.control_enabled;
 }
+function kiParameter() { return view?.parameters?.find(p => p.id === 3 && p.name === 'pitch.speed.ki'); }
 function enableControls() {
   const connected = !!view?.connected, ready = fresh() && !busy;
   $('connect').disabled = busy || connected || !$('port').value || closed;
@@ -41,6 +42,7 @@ function enableControls() {
   $('record-start').disabled ||= !!view?.recording;
   $('record-stop').disabled = busy || !view?.recording;
   $('restore').disabled = !ready || !view?.can_restore;
+  for (const id of ['ki-apply','ki-zero','ki-input','ki-down','ki-up']) $(id).disabled = !ready || !kiParameter();
   $('uart').disabled = busy || !gates() || view?.state?.source === 1;
   $('can').disabled = !ready;
   $('send').disabled = busy || !gates() || view?.state?.source !== 1;
@@ -87,11 +89,20 @@ function draftState() {
   $('parameter-state').textContent = !s ? '等待板端读回' : dirty ? '输入待应用' : '与板端读回一致';
   $('parameter-state').classList.toggle('pending', !!dirty);
   $('offset-rad').textContent = valid(offset) ? offset.toFixed(4) + ' rad（输入）' : '— rad';
+  const ki = $('ki-input').value.trim() ? Number($('ki-input').value) : NaN;
+  const kiDirty = s && (!valid(ki) || Math.abs(ki - s.speed_ki) > 0.000001);
+  $('ki-state').textContent = !s ? '等待板端读回' : kiDirty ? '输入待应用' : '与板端读回一致';
+  $('ki-state').classList.toggle('pending', !!kiDirty);
 }
 function fillParameters() {
   if (!view?.state) return;
   $('gain').value = valid(view.state.gain) ? String(view.state.gain) : '';
   $('offset').value = valid(view.state.offset_rad) ? degrees(view.state.offset_rad).toFixed(6) : '';
+  fillKi();
+  draftState();
+}
+function fillKi() {
+  $('ki-input').value = valid(view?.state?.speed_ki) ? String(view.state.speed_ki) : '';
   draftState();
 }
 function targetDraft() {
@@ -101,7 +112,7 @@ function targetDraft() {
 function step(id, amount) {
   if (!$(id).value.trim()) return notice('请先连接设备读回数值，或填写输入框。', true);
   const value = Number($(id).value) + amount;
-  $(id).value = Number(value.toFixed(6));
+  $(id).value = id === 'ki-input' ? Math.max(0, Math.min(kiParameter().maximum, Number(value.toFixed(6)))) : Number(value.toFixed(6));
   id === 'target' ? targetDraft() : draftState();
 }
 function badge(text, tone) {
@@ -115,7 +126,7 @@ function renderRecords(records) {
   body.replaceChildren();
   records.slice(-20).forEach((row, index) => {
     const tr = document.createElement('tr');
-    [records.length - Math.min(records.length, 20) + index + 1, format(row.gain), format(valid(row.offset_rad) ? degrees(row.offset_rad) : null, 2),
+    [records.length - Math.min(records.length, 20) + index + 1, format(row.gain), format(valid(row.offset_rad) ? degrees(row.offset_rad) : null, 2), format(row.speed_ki, 2),
       format(valid(row.target_angle_rad) ? degrees(row.target_angle_rad) : null, 2), format(valid(row.actual_angle_rad) ? degrees(row.actual_angle_rad) : null, 2),
       format(valid(row.angle_error_rad) ? degrees(row.angle_error_rad) : null, 2), row.total_saturated ? '是' : '否'].forEach(text => {
       const td = document.createElement('td'); td.textContent = String(text); tr.append(td);
@@ -136,6 +147,7 @@ function render() {
     }
     $('gain-current').textContent = format(s.gain);
     $('offset-current').textContent = angle(s.offset_rad);
+    $('ki-current').textContent = format(s.speed_ki, 2);
     for (const [id, key, places] of [['p-out','p_out',0],['i-out','i_out',0],['d-out','d_out',1],['pid-out','pid_unclamped_out',0],
       ['gravity-out','gravity_out',0],['total-out','total_out',0],['motor-cmd','motor_cmd',0],['speed','speed_rad_s',4],['ki','speed_ki',0]]) $(id).textContent = format(s[key], places);
     $('flags').replaceChildren(
@@ -157,6 +169,9 @@ function render() {
     $('limits').textContent = `板端限幅：重力补偿 ±${format(info.gravity_max_out)} · 总输出 ±${format(info.total_max_out)}。输出刻度不是 mA。`;
   }
   $('record-status').textContent = `${view?.recording ? '正在记录 · ' : '已记录 '}${view?.recorded_count || 0} 点`;
+  const ki = kiParameter();
+  $('ki-support').textContent = !connected ? '连接后读取 Ki 的允许范围。' : !ki ? '当前固件不支持实时修改 Ki，请先烧录新版固件。' : `允许 ${ki.minimum}～${ki.maximum}；±100 按钮只修改输入框，点击应用后才下发。`;
+  if (ki) { $('ki-input').min = ki.minimum; $('ki-input').max = ki.maximum; }
   $('record-status').classList.toggle('recording', !!view?.recording);
   renderRecords(view?.records || []);
   draftState(); enableControls(); drawChart();
@@ -244,6 +259,14 @@ $('port').onchange = enableControls;
 $('connect').onclick = () => action('connect', {port:$('port').value});
 $('disconnect').onclick = () => action('disconnect');
 $('gain-down').onclick = () => step('gain', -100); $('gain-up').onclick = () => step('gain', 100);
+$('ki-down').onclick = () => step('ki-input', -100); $('ki-up').onclick = () => step('ki-input', 100);
+$('ki-input').oninput = draftState;
+$('ki-apply').onclick = () => tryInput(() => {
+  const speed_ki = inputNumber('ki-input', 'Ki'), parameter = kiParameter();
+  if (!parameter || speed_ki < parameter.minimum || speed_ki > parameter.maximum) throw new Error('Ki 超出板端允许范围');
+  action('ki', {speed_ki});
+});
+$('ki-zero').onclick = async () => { if (await action('ki', {speed_ki:0})) fillKi(); };
 $('target-down').onclick = () => step('target', -1); $('target-up').onclick = () => step('target', 1);
 $('gain').oninput = draftState; $('offset').oninput = draftState; $('target').oninput = targetDraft;
 $('apply').onclick = () => tryInput(() => {

@@ -53,10 +53,12 @@ functions = '\n'.join(function(name) for name in (
     'radFormat', 'gimbal_PID_calc', 'calcPitchGravity',
     'limitPitchOutput', 'pitch_speed_pid_calc', 'unitPID_calc'))
 tests = r'''
-static void near_value(float a, float b)
+static void near_value_at(float a, float b, int line)
 {
+    if (fabsf(a - b) >= 0.002f) fprintf(stderr, "near_value failed at generated line %d: %f != %f\n", line, a, b);
     assert(fabsf(a - b) < 0.002f);
 }
+#define near_value(a, b) near_value_at((a), (b), __LINE__)
 
 #define TEST_KI 8000.0f /* 仅用于验证积分路径，不是工程默认值 */
 
@@ -71,6 +73,7 @@ static void setup_default(void)
     rc_online = 1;
     PID_init(&PitchCtrl.spd_pid, PID_POSITION, pitchSpdPIDco,
              PITCH_VOLT_MAX_OUT, PITCH_VOLT_MAX_IOUT);
+    PitchCtrl.spd_pid.Ki = 0; /* 基线测试显式关闭积分，不约束用户正在调试的上电默认值。 */
     PID_init(&PitchCtrl.agl_pid, PID_POSITION, pitchAglPIDco,
              PITCH_AGL_SPD_MAX_OUT, PITCH_AGL_SPD_MAX_IOUT);
     PID_init(&YawCtrl.spd_pid, PID_POSITION, yawSpdPIDco,
@@ -104,7 +107,6 @@ static float integrate_for_ms(uint32_t period_ms, int duration_ms)
 int main(void)
 {
     /* Test setup：Ki=0、gain=0，Pitch 输出与基线 gimbal_PID_calc + PID_calc 逐周期一致。 */
-    assert(PITCH_SPD_KI == 0.0f);
     setup_default();
     {
         pid_type_def base_angle = PitchCtrl.agl_pid;
@@ -263,13 +265,14 @@ int main(void)
     }
     for (int sign = -1; sign <= 1; sign += 2) {
         setup();
-        pitch_gravity_config.gain = sign * 10000;
-        for (int i = 0; i < 1000; ++i) unitPID_calc();
+        pitch_gravity_config.gain = sign * PITCH_GRAVITY_MAX_OUT * 2;
+        const int ramp_cycles = (int)(PITCH_GRAVITY_MAX_OUT / (PITCH_GRAVITY_SLEW_PER_SECOND * 0.002f)) + 2;
+        for (int i = 0; i < ramp_cycles; ++i) unitPID_calc();
         near_value(pitch_control_debug.gravity_out, sign * PITCH_GRAVITY_MAX_OUT);
         assert(pitch_control_debug.gravity_limited);
         assert(fabsf((float)PitchCtrl.Volt_out) <= PITCH_GRAVITY_MAX_OUT);
         pitch_gravity_config.gain = 0;
-        for (int i = 0; i < 1000; ++i) unitPID_calc();
+        for (int i = 0; i < ramp_cycles; ++i) unitPID_calc();
         near_value(pitch_control_debug.gravity_out, 0);
         assert(PitchCtrl.Volt_out == 0);
     }

@@ -76,7 +76,7 @@ class PanelController:
         self.thread.start()
 
     def submit(self, action, values=None):
-        if action not in {'connect', 'disconnect', 'parameters', 'zero', 'restore',
+        if action not in {'connect', 'disconnect', 'parameters', 'ki', 'zero', 'restore',
                           'uart', 'can', 'target', 'read', 'mark', 'record_start', 'record_stop'}:
             raise ValueError('未知操作')
         with self.lock:
@@ -165,10 +165,12 @@ class PanelController:
             for key in ('pitch_min_rad', 'pitch_max_rad', 'gain_max', 'offset_max_rad'):
                 finite(info[key], key)
             parameters = self.link.parameters()
-            # 本界面只暴露这两个参数；先验证设备注册表，防止误连其他固件。
+            # 重力参数是基础接口；Ki 可选，旧固件仍能连接但不开放 Ki 写入。
             names = {p['id']: p['name'] for p in parameters}
             if names.get(1) != 'pitch.gravity.gain' or names.get(2) != 'pitch.gravity.offset':
                 raise ValueError('设备参数表不匹配，请烧录本工程的串口调参固件')
+            if 3 in names and names[3] != 'pitch.speed.ki':
+                raise ValueError('设备 Ki 参数表不匹配，请烧录本工程的串口调参固件')
             state = self.link.state()
         except Exception:
             self._close(False)
@@ -196,6 +198,20 @@ class PanelController:
             raise ValueError('写入已回复，但当前读回值不同；请以板端读回为准')
         return '参数已写入 RAM 并读回确认；重启恢复固件默认值。'
 
+    def _set_ki(self, value):
+        parameter = next((p for p in self.parameters if p['id'] == 3 and p['name'] == 'pitch.speed.ki'), None)
+        if parameter is None:
+            raise ValueError('当前固件不支持实时修改 Ki，请先烧录新版固件')
+        value = finite(value, 'Ki')
+        minimum, maximum = finite(parameter['minimum'], 'Ki 下限'), finite(parameter['maximum'], 'Ki 上限')
+        if not 0 <= minimum <= value <= maximum:
+            raise ValueError(f'Ki 超出板端允许范围 {minimum:g}～{maximum:g}')
+        confirmed = self.link.set_parameters({3: value})
+        current = self._read()
+        if current['speed_ki'] is None or not math.isclose(current['speed_ki'], confirmed[3], rel_tol=1e-5, abs_tol=1e-6):
+            raise ValueError('Ki 写入已回复，但当前读回值不同；请以板端读回为准')
+        return ('已关闭积分并清零 I 项。' if value == 0 else 'Ki 已写入 RAM 并读回确认；保留已有 I 项。') + ' 重启恢复固件默认值。'
+
     def _execute(self, action, values):
         if action == 'connect':
             return self._connect(values)
@@ -209,6 +225,8 @@ class PanelController:
             raise ValueError('请先连接设备')
         if action == 'parameters':
             return self._set_parameters(values.get('gain'), math.radians(finite(values.get('offset_deg'), 'Offset')))
+        if action == 'ki':
+            return self._set_ki(values.get('speed_ki'))
         if action == 'zero':
             state = self._read()
             if state['gain'] != 0:

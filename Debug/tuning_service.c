@@ -8,15 +8,16 @@ typedef struct
 {
     uint16_t id;
     const char *name;
-    uint8_t unit; /* 0：控制量刻度，1：rad */
+    uint8_t unit; /* 0：控制量刻度，1：rad，2：速度环 Ki（每 2 ms） */
     size_t offset;
     float step;
 } tuning_parameter_t;
 
 /* 参数由表注册，读写与范围检查共用，不为每个参数增加一条串口命令。 */
 static const tuning_parameter_t parameters[] = {
-    {1, "pitch.gravity.gain", 0, offsetof(pitch_gravity_config_t, gain), 100.0f},
-    {2, "pitch.gravity.offset", 1, offsetof(pitch_gravity_config_t, offset_rad), 0.01f}
+    {1, "pitch.gravity.gain", 0, offsetof(pitch_tuning_state_t, gravity) + offsetof(pitch_gravity_config_t, gain), 100.0f},
+    {2, "pitch.gravity.offset", 1, offsetof(pitch_tuning_state_t, gravity) + offsetof(pitch_gravity_config_t, offset_rad), 0.01f},
+    {3, "pitch.speed.ki", 2, offsetof(pitch_tuning_state_t, speed_ki), 100.0f}
 };
 #define PARAMETER_COUNT (sizeof(parameters) / sizeof(parameters[0]))
 
@@ -31,16 +32,23 @@ static const tuning_parameter_t *find_parameter(uint16_t id)
     return NULL;
 }
 
-static float parameter_value(const pitch_gravity_config_t *config, const tuning_parameter_t *parameter)
+static float parameter_value(const pitch_tuning_state_t *state, const tuning_parameter_t *parameter)
 {
     float value;
-    memcpy(&value, (const uint8_t *)config + parameter->offset, sizeof(value));
+    memcpy(&value, (const uint8_t *)state + parameter->offset, sizeof(value));
     return value;
 }
 
 static float parameter_max(const pitch_tuning_limits_t *limits, const tuning_parameter_t *parameter)
 {
+    if (parameter->unit == 2U)
+        return limits->speed_ki_max;
     return parameter->unit == 0U ? limits->gain_max : limits->offset_max_rad;
+}
+
+static float parameter_min(float max_value, const tuning_parameter_t *parameter)
+{
+    return parameter->unit == 2U ? 0.0f : -max_value;
 }
 
 static uint8_t set_parameters(const tuning_message_t *request, tuning_message_t *reply)
@@ -69,12 +77,13 @@ static uint8_t set_parameters(const tuning_message_t *request, tuning_message_t 
             if (id == tuning_read_u16(request->payload + 1U + 6U * j))
                 return TUNING_BAD_PARAMETER;
         value = tuning_read_float(request->payload + 3U + 6U * i);
-        if (!isfinite(value) || fabsf(value) > parameter_max(&limits, parameter))
+        const float maximum = parameter_max(&limits, parameter);
+        if (!isfinite(value) || value < parameter_min(maximum, parameter) || value > maximum)
             return TUNING_OUT_OF_RANGE;
-        memcpy((uint8_t *)&state.gravity + parameter->offset, &value, sizeof(value));
+        memcpy((uint8_t *)&state + parameter->offset, &value, sizeof(value));
     }
     /* 全部检查通过后一起提交。任意一项错误都不修改运行参数。 */
-    status = gimbal_tuning_set_gravity(state.gravity.gain, state.gravity.offset_rad);
+    status = gimbal_tuning_set_parameters(state.gravity.gain, state.gravity.offset_rad, state.speed_ki);
     if (status == TUNING_OK)
     {
         memcpy(reply->payload + 1, request->payload, request->length);
@@ -162,10 +171,10 @@ void tuning_service_request(const tuning_message_t *request, tuning_message_t *r
         max_value = parameter_max(&limits, parameter);
         tuning_write_u16(reply->payload + 1, parameter->id);
         reply->payload[3] = parameter->unit;
-        tuning_write_float(reply->payload + 4, -max_value);
+        tuning_write_float(reply->payload + 4, parameter_min(max_value, parameter));
         tuning_write_float(reply->payload + 8, max_value);
         tuning_write_float(reply->payload + 12, parameter->step);
-        tuning_write_float(reply->payload + 16, parameter_value(&state.gravity, parameter));
+        tuning_write_float(reply->payload + 16, parameter_value(&state, parameter));
         memcpy(reply->payload + 20, parameter->name, strlen(parameter->name) + 1U);
         reply->length = (uint16_t)(21U + strlen(parameter->name));
         break;
@@ -175,7 +184,7 @@ void tuning_service_request(const tuning_message_t *request, tuning_message_t *r
         if (parameter == NULL) { status = TUNING_BAD_PARAMETER; break; }
         gimbal_tuning_get_state(&state);
         tuning_write_u16(reply->payload + 1, parameter->id);
-        tuning_write_float(reply->payload + 3, parameter_value(&state.gravity, parameter));
+        tuning_write_float(reply->payload + 3, parameter_value(&state, parameter));
         reply->length = 7;
         break;
     case TUNING_PARAM_SET:

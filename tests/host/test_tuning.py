@@ -73,7 +73,7 @@ uint8_t fire_t;
         'NX_GetSource', 'NX_SelectSource', 'NX_ReceiveFrame', 'NX_TakeControlFrame'))
     funcs += '\n' + '\n'.join(function(source, name) for name in (
         'getControlAngles', 'gimbal_tuning_is_enabled', 'gimbal_tuning_get_state',
-        'gimbal_tuning_get_limits', 'gimbal_tuning_set_gravity',
+        'gimbal_tuning_get_limits', 'gimbal_tuning_set_gravity', 'gimbal_tuning_set_parameters',
         'gimbal_tuning_set_source', 'gimbal_tuning_submit_vision'))
     tests = r'''
 static tuning_message_t request, reply;
@@ -81,6 +81,8 @@ static void call(uint8_t command, uint16_t length, uint8_t expected)
 {
     request.command = command; request.length = length; request.sequence = 17;
     tuning_service_request(&request, &reply);
+    if (reply.payload[0] != expected)
+        fprintf(stderr, "command=%u length=%u expected=%u actual=%u id=%u value=%f\n", command, length, expected, reply.payload[0], tuning_read_u16(request.payload + 1), tuning_read_float(request.payload + 3));
     assert(reply.command == (command | 0x80) && reply.sequence == 17);
     assert(reply.payload[0] == expected);
 }
@@ -125,7 +127,7 @@ static void test_protocol(void)
 static void test_service(void)
 {
     call(TUNING_HELLO, 0, TUNING_OK); assert(reply.length == 41);
-    assert(tuning_read_u16(reply.payload + 2) == 2);
+    assert(tuning_read_u16(reply.payload + 2) == 3);
     call(0x7f, 0, TUNING_BAD_COMMAND);
     call(TUNING_STATE, 1, TUNING_BAD_LENGTH);
     request.payload[0] = 2;
@@ -142,16 +144,49 @@ static void test_service(void)
     }
     tuning_write_u16(request.payload + 7, 1); call(TUNING_PARAM_SET, 13, TUNING_BAD_PARAMETER);
     tuning_write_u16(request.payload + 7, 999); call(TUNING_PARAM_SET, 13, TUNING_BAD_PARAMETER);
-    request.payload[0] = 1; tuning_write_float(request.payload + 3, -5001);
+    request.payload[0] = 1; tuning_write_float(request.payload + 3, -PITCH_GRAVITY_MAX_OUT - 1);
     call(TUNING_PARAM_SET, 7, TUNING_OUT_OF_RANGE);
-    tuning_write_float(request.payload + 3, -5000); call(TUNING_PARAM_SET, 7, TUNING_OK);
+    tuning_write_float(request.payload + 3, -PITCH_GRAVITY_MAX_OUT); call(TUNING_PARAM_SET, 7, TUNING_OK);
     tuning_write_u16(request.payload, 1); call(TUNING_PARAM_GET, 2, TUNING_OK);
-    assert(tuning_read_float(reply.payload + 3) == -5000);
+    assert(tuning_read_float(reply.payload + 3) == -PITCH_GRAVITY_MAX_OUT);
     tuning_write_u16(request.payload, 0); call(TUNING_PARAM_INFO, 2, TUNING_OK);
     assert(tuning_read_u16(reply.payload + 1) == 1 && reply.payload[3] == 0);
     tuning_write_u16(request.payload, 1); call(TUNING_PARAM_INFO, 2, TUNING_OK);
     assert(tuning_read_u16(reply.payload + 1) == 2 && reply.payload[3] == 1);
-    tuning_write_u16(request.payload, 2); call(TUNING_PARAM_INFO, 2, TUNING_BAD_PARAMETER);
+    tuning_write_u16(request.payload, 2); call(TUNING_PARAM_INFO, 2, TUNING_OK);
+    assert(tuning_read_u16(reply.payload + 1) == 3 && reply.payload[3] == 2);
+    assert(tuning_read_float(reply.payload + 4) == 0 && tuning_read_float(reply.payload + 8) == PITCH_SPD_KI_MAX);
+    assert(strcmp((char *)reply.payload + 20, "pitch.speed.ki") == 0);
+    tuning_write_u16(request.payload, 3); call(TUNING_PARAM_INFO, 2, TUNING_BAD_PARAMETER);
+
+    /* Ki 单写不能改变重力参数或已有 I；无效 Ki/混合批次必须整体拒绝。 */
+    PitchCtrl.spd_pid.Iout = 321;
+    request.payload[0] = 1; tuning_write_u16(request.payload + 1, 3);
+    tuning_write_float(request.payload + 3, 500); call(TUNING_PARAM_SET, 7, TUNING_OK);
+    assert(PitchCtrl.spd_pid.Ki == 500 && PitchCtrl.spd_pid.Iout == 321);
+    assert(pitch_gravity_config.gain == -PITCH_GRAVITY_MAX_OUT && pitch_gravity_config.offset_rad == 0.2f);
+    tuning_write_u16(request.payload, 3); call(TUNING_PARAM_GET, 2, TUNING_OK);
+    assert(tuning_read_float(reply.payload + 3) == 500);
+    request.payload[0] = 3;
+    tuning_write_u16(request.payload + 1, 1); tuning_write_float(request.payload + 3, 600);
+    tuning_write_u16(request.payload + 7, 2); tuning_write_float(request.payload + 9, 0.1f);
+    tuning_write_u16(request.payload + 13, 3);
+    const float bad_ki[] = {-1, PITCH_SPD_KI_MAX + 1, NAN, INFINITY};
+    for (unsigned i = 0; i < 4; ++i) {
+        tuning_write_float(request.payload + 15, bad_ki[i]);
+        call(TUNING_PARAM_SET, 19, TUNING_OUT_OF_RANGE);
+        assert(PitchCtrl.spd_pid.Ki == 500 && PitchCtrl.spd_pid.Iout == 321);
+        assert(pitch_gravity_config.gain == -PITCH_GRAVITY_MAX_OUT && pitch_gravity_config.offset_rad == 0.2f);
+    }
+    tuning_write_float(request.payload + 15, PITCH_SPD_KI_MAX);
+    call(TUNING_PARAM_SET, 19, TUNING_OK);
+    assert(PitchCtrl.spd_pid.Ki == PITCH_SPD_KI_MAX && PitchCtrl.spd_pid.Iout == 321);
+    assert(pitch_gravity_config.gain == 600 && pitch_gravity_config.offset_rad == 0.1f);
+    /* 关闭 Ki 必须去掉残留 I；临界区嵌套后恢复调用者原中断状态。 */
+    irq_key = 1;
+    assert(gimbal_tuning_set_parameters(600, 0.1f, 0) == TUNING_OK);
+    assert(irq_key == 1 && PitchCtrl.spd_pid.Ki == 0 && PitchCtrl.spd_pid.Iout == 0);
+    irq_key = 0;
     tuning_write_u16(request.payload, 50); call(TUNING_STREAM, 2, TUNING_OUT_OF_RANGE);
     assert(tuning_service_period_ms() == 0);
     tuning_write_u16(request.payload, 200); call(TUNING_STREAM, 2, TUNING_OK);
@@ -194,7 +229,7 @@ static void test_control(void)
     assert(NX_ReceiveFrame(can_payload, NX_SOURCE_CAN));
     getControlAngles(); assert(fabsf(PitchCtrl.want_AbsoluteAngleCtrl + 0.2f) < 0.0001f);
     assert(YawCtrl.want_AbsoluteAngleCtrl == 0 && fire_t == 1);
-    assert(PITCH_SPD_KI == 0.0f && PitchCtrl.spd_pid.Ki == 0.0f);
+    assert(PitchCtrl.spd_pid.Ki == 0.0f);
     assert(irq_key == 0);
 }
 int main(int argc, char **argv)
@@ -270,14 +305,27 @@ class HostTests(unittest.TestCase):
     def test_python_client_with_actual_c_service(self):
         client = link.TuningLink(FirmwarePort(self.executable))
         try:
-            self.assertEqual(client.hello()['parameter_count'], 2)
-            self.assertEqual([p['id'] for p in client.parameters()], [1, 2])
+            self.assertEqual(client.hello()['parameter_count'], 3)
+            parameters = client.parameters()
+            self.assertEqual([p['id'] for p in parameters], [1, 2, 3])
+            self.assertEqual(parameters[2]['minimum'], 0)
+            self.assertEqual(parameters[2]['maximum'], 8000)
             client.set_parameters({1: -1400, 2: 0.1})
             self.assertEqual(client.get_parameter(1), -1400)
             state = client.state()
             self.assertEqual(state['gain'], -1400)
             self.assertEqual(state['speed_ki'], 0)
             self.assertEqual(state['source'], 0)
+            client.set_parameters({3: 500})
+            self.assertEqual(client.get_parameter(3), 500)
+            self.assertEqual(client.state()['speed_ki'], 500)
+            self.assertEqual(client.state()['gain'], -1400)
+            with self.assertRaises(ValueError):
+                client.set_parameters({1: 1000, 2: 0.2, 3: -1})
+            self.assertEqual(client.get_parameter(1), -1400)
+            self.assertEqual(client.get_parameter(3), 500)
+            client.set_parameters({3: 0})
+            self.assertEqual(client.state()['i_out'], 0)
             self.assertEqual(state['tick_ms'], 1234)
             self.assertAlmostEqual(state['offset_rad'], 0.1)
             client.stream(200)
