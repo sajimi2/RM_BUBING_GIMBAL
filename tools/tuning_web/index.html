@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="panel-token" content="__PANEL_TOKEN__">
+  <title>云台调参台 · Pitch</title>
+  <link rel="stylesheet" href="/panel.css">
+  <script src="/panel.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div><div class="eyebrow">GIMBAL LAB / 本机串口工具</div><h1>云台调参台<span>Pitch</span></h1></div>
+    <div class="header-right"><span id="connection-badge" class="badge">未连接设备</span><button id="exit" class="quiet">退出调参台</button></div>
+  </header>
+  <section class="connection" aria-label="串口连接">
+    <div class="port-field"><label for="port">DAP 串口</label><select id="port"><option value="">正在读取串口…</option></select></div>
+    <button id="refresh">刷新端口</button><button id="connect" class="primary">连接设备</button><button id="disconnect" disabled>断开</button>
+    <span class="serial-info">115200 · 8N1<span>SWD 调试可同时运行</span></span>
+  </section>
+  <div id="notice" class="notice" role="status">选择串口后连接。连接只读取板端状态，不会自动使能、修改参数或发送目标。</div>
+  <main>
+    <div class="controls">
+      <section class="card">
+        <div class="heading"><h2>重力补偿</h2><span id="parameter-state" class="muted small">等待板端读回</span></div>
+        <label for="gain">补偿幅值 <span>Gain · PID 输出刻度</span></label>
+        <div class="stepper"><button id="gain-down" aria-label="Gain 减少100">−100</button><input id="gain" type="number" step="100" placeholder="连接后读回"><button id="gain-up" aria-label="Gain 增加100">+100</button></div>
+        <div class="readback">板端读回 <strong id="gain-current">—</strong><span>输入不会立即下发</span></div>
+        <label for="offset">角度偏移 <span>Offset · 度</span></label>
+        <div class="unit-input"><input id="offset" type="number" step="0.1" placeholder="连接后读回"><span>°</span></div>
+        <div class="readback">板端读回 <strong id="offset-current">—</strong><span id="offset-rad">— rad</span></div>
+        <button id="apply" class="primary full" disabled>应用参数并读回</button>
+        <div class="button-row"><button id="zero" disabled>暂时关闭补偿</button><button id="restore" disabled>恢复关闭前参数</button></div>
+        <button id="read" class="quiet full" disabled>用板端当前值填回输入框</button>
+        <p class="hint">只修改 RAM；重启恢复固件默认值。先固定 Offset，只调整 Gain 做对照。</p>
+      </section>
+      <section class="card">
+        <div class="heading"><h2>模拟视觉目标</h2><span id="source-badge" class="badge">来源未知</span></div>
+        <button id="uart" class="full" disabled>开始串口模拟（保持当前角）</button>
+        <button id="can" class="quiet full" disabled>恢复 CAN 视觉来源</button>
+        <div id="gate-hint" class="hint gate">需遥控器在线、解除无力并进入自瞄。</div>
+        <label for="target">Pitch 绝对目标 <span>度 · 不是增量</span></label>
+        <div class="stepper"><button id="target-down" aria-label="目标角度减少1度">−1°</button><input id="target" type="number" step="0.1" placeholder="输入目标"><button id="target-up" aria-label="目标角度增加1度">+1°</button></div>
+        <div class="readback"><span id="target-rad">— rad</span><button id="current-angle" class="text-button" disabled>取当前角填入</button></div>
+        <button id="send" class="primary full" disabled>发送目标</button>
+        <p class="hint" id="target-range">允许范围等待板端读取。Yaw 保持原目标，不接受开火请求。</p>
+      </section>
+    </div>
+    <div class="observation">
+      <section class="card live">
+        <div class="heading"><h2>目标与实际角度</h2><span id="freshness" class="muted small">尚无实测数据</span></div>
+        <div class="metrics">
+          <div><span>目标角度</span><strong id="target-value">—</strong><small id="target-value-rad">— rad</small></div>
+          <div><span>实际角度</span><strong id="actual-value">—</strong><small id="actual-value-rad">— rad</small></div>
+          <div><span>角度误差</span><strong id="error-value">—</strong><small id="error-value-rad">— rad</small></div>
+        </div>
+        <div class="chart-header"><div class="legend"><span class="target-line">目标</span><span class="actual-line">实际</span></div><span>最近 60 秒 · 单位 °</span></div>
+        <svg id="chart" role="img" aria-label="板端目标角度和实际角度的实时曲线" viewBox="0 0 700 230"></svg>
+        <div id="chart-empty" class="chart-empty">连接后显示实际采样曲线，没有演示读数</div>
+        <div class="flag-strip" id="flags"><span class="badge">等待设备状态</span></div>
+        <div class="output-grid">
+          <div><span>P 输出</span><strong id="p-out">—</strong></div><div><span>I 输出</span><strong id="i-out">—</strong></div><div><span>D 输出</span><strong id="d-out">—</strong></div>
+          <div><span>PID 合计（未限幅）</span><strong id="pid-out">—</strong></div><div><span>实际重力补偿</span><strong id="gravity-out">—</strong></div><div><span>合成输出（限幅后）</span><strong id="total-out">—</strong></div>
+          <div><span>电机最终指令</span><strong id="motor-cmd">—</strong></div><div><span>当前速度 · rad/s</span><strong id="speed">—</strong></div><div><span>速度环 Ki</span><strong id="ki">—</strong></div>
+        </div>
+        <p id="limits" class="hint">输出使用原电机协议刻度，不是 mA。</p>
+      </section>
+      <section class="card">
+        <div class="heading"><h2>记录与对照</h2><span id="record-status" class="muted small">尚未开始记录</span></div>
+        <div class="record-controls"><button id="record-start" disabled>开始新记录</button><button id="record-stop" disabled>停止记录</button><button id="export" disabled>导出本轮 CSV</button></div>
+        <p class="hint">开始新记录会清空上一轮连续记录。需要保留的数据请先导出；上方实时曲线不清空。</p>
+        <div class="separator"></div>
+        <div class="heading tight"><span class="muted small">固定目标，等稳定后保存一组读数</span><button id="mark" disabled>保存当前对照</button></div>
+        <div class="table-scroll"><table><thead><tr><th>组</th><th>Gain</th><th>Offset °</th><th>目标 °</th><th>实际 °</th><th>误差 °</th><th>总输出限幅</th></tr></thead><tbody id="records"><tr><td colspan="7" class="empty">尚未保存对照</td></tr></tbody></table></div>
+        <button id="export-snapshots" class="quiet" disabled>导出对照 CSV</button>
+        <p class="hint">记录保留在本次调参台进程中，退出前请导出。连续记录上限 18000 点，约 1 小时。</p>
+      </section>
+      <details class="card log-card"><summary>操作记录 <span id="log-count" class="muted small">0</span></summary><ol id="log"></ol></details>
+    </div>
+  </main>
+  <footer><span>关闭网页或拔 USB 不会撤销最后目标。结束实验先用遥控器退出自瞄。</span><span id="last-action">未发送任何设备指令</span></footer>
+</div>
+</body>
+</html>

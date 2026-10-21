@@ -1,6 +1,6 @@
 # BubinGimbalV1.0
 
-串口在线调重力参数、模拟视觉目标的接线和使用说明见 [SERIAL_TUNING.md](SERIAL_TUNING.md)。当前已实现板端与电脑通信层，图形界面原型尚未连接实物。
+双击根目录的 **`打开云台调参台.cmd`**，可在图形界面里连接串口、在线调重力参数、模拟 Pitch 视觉目标、查看曲线并导出 CSV。先烧录并运行当前固件；使用说明见 [SERIAL_TUNING.md](SERIAL_TUNING.md)。界面已完成离线验收，实物串口和上车效果待验证。
 
 步兵云台 C 板固件，STM32F407IGHx + FreeRTOS。车上烧录的基线及其来源见 `BASELINE.md`。
 

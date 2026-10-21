@@ -158,18 +158,41 @@ static void getInstruction(void)
 //摩擦轮状态机
 static void fricModeChange(void)
 {
-	fricOn=0;
-	if(trigger_state==1 || rc_p->mouse.press_r==1)//开
+	fricOn = 0;
+
+	// 第一步：先按遥控器决定摩擦轮开不开（和原来的逻辑一样）
+	if (trigger_state == 1)          // 左拨杆打上：开
 	{
-		fricOn=1;
+		fricOn = 1;
 	}
-	else if(trigger_state==3)//关
+	else if (trigger_state == 3)     // 左拨杆打中间：关
 	{
-		fricOn=0;
+		fricOn = 0;
 	}
-	else if(trigger_state==2)//自动
+	else if (trigger_state == 2)     // 左拨杆打下：进自瞄，开
 	{
-		fricOn=1;//进自动模式全程开摩擦轮
+		fricOn = 1;
+	}
+
+	if (rc_p->mouse.press_r == 1)    // 按住鼠标右键：开
+	{
+		fricOn = 1;
+	}
+
+	// 第二步：在自瞄模式下，如果只需要瞄准、不需要发射，就把摩擦轮关掉
+	if (robotIsAuto() == 1)
+	{
+		// 情况一：正在用串口模拟视觉指令。串口模拟本来就不能开火，所以不开摩擦轮
+		if (NX_GetSource() == NX_SOURCE_UART)
+		{
+			fricOn = 0;
+		}
+
+		// 情况二：视觉在 rev 的最低位填了 1，表示这次只瞄准、不发射
+		if ((nx_p->rev & 0x0001) == 1)
+		{
+			fricOn = 0;
+		}
 	}
 }
 

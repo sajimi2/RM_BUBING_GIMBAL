@@ -63,7 +63,7 @@
 #define YAW_VOLT_MAX_IOUT 10000.0f
 
 // Pitch重力补偿参数，输出单位与速度环PID相同，幅值和方向需实车标定
-#define PITCH_GRAVITY_GAIN_DEFAULT    -800.0f    // 补偿幅值
+#define PITCH_GRAVITY_GAIN_DEFAULT    1200.0f    // 补偿幅值
 #define PITCH_GRAVITY_OFFSET_DEFAULT  0.0f    // 调整在哪个俯仰角的补偿最大，默认0=水平
 #define PITCH_GRAVITY_MAX_OUT         5000.0f // 补偿自身的输出限幅
 #define PITCH_GRAVITY_SLEW_PER_SECOND 20000.0f // 补偿每秒最多变化的控制量

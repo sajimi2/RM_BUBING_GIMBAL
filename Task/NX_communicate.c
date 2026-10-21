@@ -37,6 +37,7 @@ void NX_SelectSource(uint8_t source)
         input_source = source;
         data_ready = 0;
         fire_t = 0;
+        NX_data.fire = 0;// 清除旧的开火请求，避免切换来源后误触发
     }
     __set_PRIMASK(key);
 }
