@@ -1,6 +1,6 @@
 # BubinGimbalV1.0
 
-双击根目录的 **`打开云台调参台.cmd`**，可在图形界面里连接串口、在线调重力参数和 Pitch 速度环 Ki、模拟 Pitch 视觉目标、查看曲线并导出 CSV。先烧录并运行当前固件；使用说明见 [SERIAL_TUNING.md](SERIAL_TUNING.md)。
+当前调参工具为 **VOFA+ 直接连接 DAP 串口**，无需网页后台。上行采用 JustFloat，下行由 VOFA+ 数值控件和按钮发送文本命令；支持 Gain、Offset、Ki、模拟 Pitch 目标与状态曲线。配置方法见 [VOFA_TUNING.md](VOFA_TUNING.md)。原网页及其二进制协议资料保留供历史查阅，不再连接当前固件。
 
 当前阶段为双环 PID + 重力补偿，默认 Ki=6000、Gain=2500、Offset=1.16 rad。串口上车对照记录、检查范围和后续真实视觉测试顺序见 [2026-10-21 阶段存档](docs/checkpoints/2026-10-21-pitch-pid-gravity.md)。Pitch 静摩擦补偿（启动补足）的代码已加入，默认关闭，见下文“Pitch 静摩擦补偿”。
 

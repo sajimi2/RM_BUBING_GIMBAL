@@ -1,4 +1,4 @@
-"""给实际 UART 驱动替换 HAL，验证 DMA 缓冲寿命、溢出恢复和半包超时。"""
+"""替换 HAL，验证真实串口驱动的 DMA 寿命、频率、超时和恢复。"""
 from pathlib import Path
 import os
 import shutil
@@ -31,9 +31,9 @@ source = r'''
 #include "tuning_uart.c"
 UART_HandleTypeDef huart6;
 static uint32_t tick;
-static uint8_t *receive_byte;
-static uint8_t *dma_bytes;
+static uint8_t *receive_byte, *dma_bytes;
 static int dma_length, transmit_fail, handled, aborted;
+static uint16_t stream_period = 20;
 uint32_t HAL_GetTick(void) { return tick; }
 int HAL_UART_Receive_IT(UART_HandleTypeDef *uart, uint8_t *byte, int length)
 { assert(uart == &huart6 && length == 1); receive_byte = byte; return HAL_OK; }
@@ -45,48 +45,64 @@ int HAL_UART_Transmit_DMA(UART_HandleTypeDef *uart, uint8_t *bytes, int length)
     uart->gState = 1; dma_bytes = bytes; dma_length = length; return HAL_OK;
 }
 int HAL_UART_AbortReceive(UART_HandleTypeDef *uart) { (void)uart; ++aborted; return HAL_OK; }
-void tuning_service_request(const tuning_message_t *req, tuning_message_t *res)
-{ ++handled; *res = *req; res->command |= 128; }
-uint16_t tuning_service_period_ms(void) { return 0; }
-void tuning_service_state(tuning_message_t *message) { (void)message; }
-static void receive(const uint8_t *bytes, unsigned length)
+void tuning_service_request(const tuning_message_t *req)
+{ if (req->status == TUNING_OK) ++handled; }
+uint16_t tuning_service_period_ms(void) { return stream_period; }
+uint16_t tuning_service_frame(uint8_t bytes[TUNING_FRAME_SIZE])
 {
-    for (unsigned i = 0; i < length; ++i) {
-        *receive_byte = bytes[i]; HAL_UART_RxCpltCallback(&huart6);
+    float values[TUNING_CHANNEL_COUNT] = {0};
+    values[0] = (float)handled;
+    return tuning_encode(values, bytes);
+}
+static void receive(const char *bytes)
+{
+    for (size_t i = 0; i < strlen(bytes); ++i) {
+        *receive_byte = (uint8_t)bytes[i]; HAL_UART_RxCpltCallback(&huart6);
     }
 }
+static void complete(void) { huart6.gState = HAL_UART_STATE_READY; }
 int main(void)
 {
-    tuning_message_t req = {.command = TUNING_PARAM_SET, .sequence = 1, .length = 7};
-    uint8_t frame[TUNING_FRAME_SIZE], snapshot[TUNING_FRAME_SIZE];
-    unsigned size = tuning_encode(&req, frame);
+    uint8_t snapshot[TUNING_FRAME_SIZE];
     tuning_uart_init();
-    receive(frame, size); tuning_uart_poll(); assert(handled == 1);
-    tuning_uart_poll(); assert(huart6.gState == 1 && dma_length == (int)size);
-    memcpy(snapshot, dma_bytes, size);
-    receive(frame, size); tuning_uart_poll();
-    assert(handled == 1 && memcmp(snapshot, dma_bytes, size) == 0);
-    huart6.gState = HAL_UART_STATE_READY;
-    tuning_uart_poll(); assert(handled == 2);
-    transmit_fail = 1; tuning_uart_poll(); assert(tuning_uart_tx_errors == 1);
-    assert(tx_length != 0 && huart6.gState == HAL_UART_STATE_READY);
-    transmit_fail = 0; tuning_uart_poll(); assert(huart6.gState == 1);
-    huart6.gState = HAL_UART_STATE_READY;
-    receive(frame, 5); tuning_uart_poll(); assert(parser.count == 5);
-    tick += 101; tuning_uart_poll(); assert(parser.count == 0);
-    receive(frame + 5, size - 5); tuning_uart_poll(); assert(handled == 2);
-    receive(frame, size); tuning_uart_poll(); assert(handled == 3);
-    tuning_uart_poll(); huart6.gState = HAL_UART_STATE_READY;
-    for (unsigned i = 0; i < RX_RING_SIZE + 10; ++i) receive(frame, 1);
+    assert(rx_byte == 0);
+    tick = 19; tuning_uart_poll(); assert(huart6.gState == 0);
+    tick = 20; tuning_uart_poll();
+    assert(huart6.gState == 1 && dma_length == TUNING_FRAME_SIZE);
+    complete();
+    receive("gain:1000\n"); tuning_uart_poll(); assert(handled == 1 && huart6.gState == 1);
+    memcpy(snapshot, dma_bytes, sizeof(snapshot));
+    receive("ki:6000\n"); tuning_uart_poll();
+    assert(handled == 1 && memcmp(snapshot, dma_bytes, sizeof(snapshot)) == 0);
+    complete(); transmit_fail = 1; tuning_uart_poll();
+    assert(handled == 2 && tuning_uart_tx_errors == 1 && tx_length != 0);
+    transmit_fail = 0; tuning_uart_poll(); assert(huart6.gState == 1 && tx_length == 0);
+    complete(); stream_period = 0;
+    receive("gain:"); tuning_uart_poll(); assert(parser.count == 5);
+    tick += 101; tuning_uart_poll(); assert(parser.count == 0 && parser.discard_line);
+    receive("gain:5000\n"); tuning_uart_poll(); assert(handled == 2);
+    complete(); receive("read:0\n"); tuning_uart_poll(); assert(handled == 3);
+    complete();
+    for (unsigned i = 0; i < RX_RING_SIZE + 10; ++i) receive("x");
     assert(tuning_uart_overflows > 0);
     tuning_uart_poll(); assert(rx_read == rx_write && !rx_overflow);
-    receive(frame, size); tuning_uart_poll(); assert(handled == 4);
-    tuning_uart_poll(); huart6.gState = HAL_UART_STATE_READY;
-    receive(frame, 5); tuning_uart_poll();
+    receive("gain:5000\n"); tuning_uart_poll(); assert(handled == 3);
+    complete(); receive("read:0\n"); tuning_uart_poll(); assert(handled == 4);
+    complete(); receive("ki:60"); tuning_uart_poll();
     HAL_UART_ErrorCallback(&huart6); tuning_uart_poll();
-    assert(aborted == 1 && tuning_uart_rx_errors == 1 && !rx_restart && !parser.count);
-    receive(frame, size); tuning_uart_poll(); assert(handled == 5);
-    puts("PASS: actual UART transport; fragmented input/timeout/DMA buffer lifetime/TX retry/overflow/UART error recovery");
+    assert(aborted == 1 && tuning_uart_rx_errors == 1 && !rx_restart);
+    receive("00\n"); tuning_uart_poll(); assert(handled == 4);
+    complete(); receive("read:0\n"); tuning_uart_poll(); assert(handled == 5);
+    complete(); receive("gain:1"); tuning_uart_poll();
+    tick += 101;
+    receive("000\n"); tuning_uart_poll(); assert(handled == 5);
+    complete(); receive("read:0\n"); tuning_uart_poll(); assert(handled == 6);
+    complete(); tick += 100; tuning_uart_poll(); assert(huart6.gState == 0);
+    stream_period = 20;
+    for (unsigned i = 0; i < 10; ++i) {
+        tick += 20; tuning_uart_poll(); assert(huart6.gState == 1); complete();
+    }
+    puts("PASS: UART JustFloat streaming/20ms scheduling/DMA buffer/TX retry/timeout suffix rejection/overflow/error recovery");
 }
 '''
 (out / 'test.c').write_text(source, encoding='utf-8')

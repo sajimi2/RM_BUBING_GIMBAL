@@ -72,8 +72,8 @@
 // Pitch静摩擦补偿（启动补足），输出单位与速度环PID相同，门槛需实车测定
 /* 确认停住、离目标还远、PID方向对但推不动时，把PID输出补到门槛值。
  * 补的是差额（门槛 - PID），不是在PID上再加一个固定值。门槛为0即关闭该方向。 */
-#define PITCH_FRICTION_UP_OUT_DEFAULT    0.0f      // 抬头方向的门槛，默认关闭
-#define PITCH_FRICTION_DOWN_OUT_DEFAULT  0.0f      // 低头方向的门槛，默认关闭
+#define PITCH_FRICTION_UP_OUT_DEFAULT    750.0f      // 抬头方向的门槛，默认关闭
+#define PITCH_FRICTION_DOWN_OUT_DEFAULT  750.0f      // 低头方向的门槛，默认关闭
 #define PITCH_FRICTION_MAX_OUT           5000.0f   // 门槛允许的最大值，超过视为填错，按关闭处理
 #define PITCH_FRICTION_ERROR_RAD_DEFAULT 0.0087f   // 约0.5°，离目标比它近时不补足
 #define PITCH_FRICTION_STILL_MS          100U      // 连续静止满这么久才算停住，单位ms
@@ -101,7 +101,7 @@
 
 // Pitch轴角度限幅
 #define PITCH_MAX_ANGLE 0.7f  // 0.275763俯角
-#define PITCH_MIN_ANGLE -0.45f //-0.280368仰角0.22
+#define PITCH_MIN_ANGLE -0.31f //备步实测-31.8°，软件限幅要比机械严格一点
 
 // 遥控器死区宏函数
 #define rc_deadband_limit(input, output, dealine)        \

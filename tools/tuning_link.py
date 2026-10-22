@@ -109,8 +109,8 @@ class TuningLink:
 
     @classmethod
     def connect(cls, port_name: str):
-        import serial  # 仅实物连接需要 pyserial；协议层与离线测试不需要它。
-        return cls(serial.Serial(port_name, 115200, timeout=0.05, write_timeout=0.5))
+        # 旧网页保留用于查阅历史；当前固件已不再接受 A5 5A 二进制协议。
+        raise RuntimeError('当前固件已迁移到 VOFA+ 直连，请按 VOFA_TUNING.md 配置；旧网页不再连接设备')
 
     def close(self):
         self.port.close()

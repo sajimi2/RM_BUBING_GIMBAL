@@ -4,220 +4,277 @@
 #include <stddef.h>
 #include <string.h>
 
+#define RAD_TO_DEG (180.0f / 3.1415926f)
+#define DEG_TO_RAD (3.1415926f / 180.0f)
+
+enum command_id
+{
+    CMD_UNKNOWN = 0,
+    CMD_READ = 1,
+    CMD_GAIN,
+    CMD_OFFSET,
+    CMD_KI,
+    CMD_PARAMETERS,
+    CMD_SOURCE,
+    CMD_TARGET,
+    CMD_STREAM,
+    CMD_GRAVITY,
+    CMD_MARK
+};
+
 typedef struct
 {
-    uint16_t id;
     const char *name;
-    uint8_t unit; /* 0：控制量刻度，1：rad，2：速度环 Ki（每 2 ms） */
-    size_t offset;
-    float step;
-} tuning_parameter_t;
+    uint8_t id;
+    uint8_t count;
+} tuning_command_t;
 
-/* 参数由表注册，读写与范围检查共用，不为每个参数增加一条串口命令。 */
-static const tuning_parameter_t parameters[] = {
-    {1, "pitch.gravity.gain", 0, offsetof(pitch_tuning_state_t, gravity) + offsetof(pitch_gravity_config_t, gain), 100.0f},
-    {2, "pitch.gravity.offset", 1, offsetof(pitch_tuning_state_t, gravity) + offsetof(pitch_gravity_config_t, offset_rad), 0.01f},
-    {3, "pitch.speed.ki", 2, offsetof(pitch_tuning_state_t, speed_ki), 100.0f}
+// 后续增加参数时，在表中注册名称、编号和参数个数。
+static const tuning_command_t commands[] = {
+    {"read", CMD_READ, 1},
+    {"gain", CMD_GAIN, 1},
+    {"offset", CMD_OFFSET, 1},
+    {"ki", CMD_KI, 1},
+    {"parameters", CMD_PARAMETERS, 3},
+    {"source", CMD_SOURCE, 1},
+    {"target", CMD_TARGET, 1},
+    {"stream", CMD_STREAM, 1},
+    {"gravity", CMD_GRAVITY, 1},
+    {"mark", CMD_MARK, 1}
 };
-#define PARAMETER_COUNT (sizeof(parameters) / sizeof(parameters[0]))
 
-static uint16_t stream_period_ms;
+static uint16_t stream_period_ms = 20U;
+static uint16_t command_count;
+static uint8_t last_command;
+static uint8_t last_status;
+static uint16_t record_mark;
+static uint8_t saved_gravity_valid;
+static pitch_gravity_config_t saved_gravity;
 
-static const tuning_parameter_t *find_parameter(uint16_t id)
+static const tuning_command_t *find_command(const char *name)
 {
     size_t i;
-    for (i = 0; i < PARAMETER_COUNT; ++i)
-        if (parameters[i].id == id)
-            return &parameters[i];
+    for (i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i)
+    {
+        if (strcmp(name, commands[i].name) == 0)
+            return &commands[i];
+    }
     return NULL;
 }
 
-static float parameter_value(const pitch_tuning_state_t *state, const tuning_parameter_t *parameter)
+static uint8_t submit_pitch(float angle_rad)
 {
-    float value;
-    memcpy(&value, (const uint8_t *)state + parameter->offset, sizeof(value));
-    return value;
-}
-
-static float parameter_max(const pitch_tuning_limits_t *limits, const tuning_parameter_t *parameter)
-{
-    if (parameter->unit == 2U)
-        return limits->speed_ki_max;
-    return parameter->unit == 0U ? limits->gain_max : limits->offset_max_rad;
-}
-
-static float parameter_min(float max_value, const tuning_parameter_t *parameter)
-{
-    return parameter->unit == 2U ? 0.0f : -max_value;
-}
-
-static uint8_t set_parameters(const tuning_message_t *request, tuning_message_t *reply)
-{
-    pitch_tuning_state_t state;
     pitch_tuning_limits_t limits;
-    uint8_t count, i, j, status;
-    uint16_t id;
-    float value;
-    const tuning_parameter_t *parameter;
+    uint8_t payload[8] = {1, 0, 0, 0, 0, 0, 0, 0};
+    int16_t raw;
+    float decoded;
 
-    if (request->length < 1U)
-        return TUNING_BAD_LENGTH;
-    count = request->payload[0];
-    if (count == 0U || count > PARAMETER_COUNT || request->length != 1U + 6U * count)
-        return TUNING_BAD_LENGTH;
-    gimbal_tuning_get_state(&state);
     gimbal_tuning_get_limits(&limits);
-    for (i = 0; i < count; ++i)
+    if (!isfinite(angle_rad))
+        return TUNING_OUT_OF_RANGE;
+    if (angle_rad < limits.pitch_min_rad || angle_rad > limits.pitch_max_rad)
+        return TUNING_OUT_OF_RANGE;
+    // 继续复用视觉八字节载荷和 Pitch 符号，向零取整避免量化越界。
+    raw = (int16_t)(-angle_rad * 32767.0f / 3.1415926f);
+    decoded = -(float)raw * 3.1415926f / 32767.0f;
+    if (decoded < limits.pitch_min_rad || decoded > limits.pitch_max_rad)
     {
-        id = tuning_read_u16(request->payload + 1U + 6U * i);
-        parameter = find_parameter(id);
-        if (parameter == NULL)
-            return TUNING_BAD_PARAMETER;
-        for (j = 0; j < i; ++j)
-            if (id == tuning_read_u16(request->payload + 1U + 6U * j))
-                return TUNING_BAD_PARAMETER;
-        value = tuning_read_float(request->payload + 3U + 6U * i);
-        const float maximum = parameter_max(&limits, parameter);
-        if (!isfinite(value) || value < parameter_min(maximum, parameter) || value > maximum)
-            return TUNING_OUT_OF_RANGE;
-        memcpy((uint8_t *)&state + parameter->offset, &value, sizeof(value));
+        if (raw > 0)
+            --raw;
+        else if (raw < 0)
+            ++raw;
     }
-    /* 全部检查通过后一起提交。任意一项错误都不修改运行参数。 */
-    status = gimbal_tuning_set_parameters(state.gravity.gain, state.gravity.offset_rad, state.speed_ki);
-    if (status == TUNING_OK)
-    {
-        memcpy(reply->payload + 1, request->payload, request->length);
-        reply->length = request->length + 1U;
-    }
+    payload[3] = (uint8_t)raw;
+    payload[4] = (uint8_t)((uint16_t)raw >> 8);
+    return gimbal_tuning_submit_vision(payload);
+}
+
+static uint8_t select_source(float value, const pitch_tuning_state_t *state)
+{
+    pitch_tuning_limits_t limits;
+    float angle;
+    uint8_t status;
+
+    if (value == 0.0f)
+        return gimbal_tuning_set_source(0);
+    if (value != 1.0f)
+        return TUNING_BAD_PARAMETER;
+    // 已在串口模式时，重复点按钮不能把目标改回实测角度。
+    if (state->source == 1U)
+        return gimbal_tuning_set_source(1);
+    angle = state->control.actual_angle_rad;
+    gimbal_tuning_get_limits(&limits);
+    if (!isfinite(angle))
+        return TUNING_OUT_OF_RANGE;
+    if (angle < limits.pitch_min_rad || angle > limits.pitch_max_rad)
+        return TUNING_OUT_OF_RANGE;
+    status = gimbal_tuning_set_source(1);
+    if (status != TUNING_OK)
+        return status;
+    status = submit_pitch(angle);
+    // 模式可能在两次调用之间变化；初始目标未接收就退回 CAN。
+    if (status != TUNING_OK)
+        gimbal_tuning_set_source(0);
     return status;
 }
 
-void tuning_service_state(tuning_message_t *message)
+static uint8_t execute_command(uint8_t id, const float *values)
 {
     pitch_tuning_state_t state;
-    const pitch_control_debug_t *c = &state.control;
-    float values[15];
-    uint16_t flags;
-    uint8_t i;
+    uint8_t status;
+    float value = values[0];
+
     gimbal_tuning_get_state(&state);
-    flags = (uint16_t)((c->control_enabled != 0U) |
-        ((c->target_limited != 0U) << 1) | ((c->integral_limited != 0U) << 2) |
-        ((c->pid_saturated != 0U) << 3) | ((c->total_saturated != 0U) << 4) |
-        ((c->integral_blocked != 0U) << 5) | ((c->integral_separated != 0U) << 6) |
-        ((c->gravity_limited != 0U) << 7) | ((c->gravity_config_invalid != 0U) << 8) |
-        ((c->friction_still != 0U) << 9) | ((c->friction_active != 0U) << 10));
-    message->payload[0] = TUNING_OK;
-    tuning_write_u32(message->payload + 1, state.tick_ms);
-    message->payload[5] = state.source;
-    message->payload[6] = state.remote_online;
-    message->payload[7] = state.automatic;
-    tuning_write_u16(message->payload + 8, flags);
-    values[0] = state.gravity.gain;
-    values[1] = state.gravity.offset_rad;
-    values[2] = c->requested_angle_rad;
-    values[3] = c->target_angle_rad;
-    values[4] = c->actual_angle_rad;
-    values[5] = c->speed_rad_s;
-    values[6] = c->angle_error_rad;
-    values[7] = c->p_out;
-    values[8] = c->i_out;
-    values[9] = c->d_out;
-    values[10] = c->pid_unclamped_out;
-    values[11] = c->gravity_target_out;
-    values[12] = c->gravity_out;
-    values[13] = c->total_unclamped_out;
-    values[14] = c->total_out;
-    for (i = 0; i < 15U; ++i)
-        tuning_write_float(message->payload + 10U + 4U * i, values[i]);
-    tuning_write_u16(message->payload + 70, (uint16_t)c->motor_cmd);
-    tuning_write_float(message->payload + 72, state.speed_ki);
-    message->length = 76;
+    switch (id)
+    {
+    case CMD_READ:
+        if (value != 0.0f)
+            return TUNING_BAD_PARAMETER;
+        return TUNING_OK;
+    case CMD_GAIN:
+        status = gimbal_tuning_set_gravity(value, state.gravity.offset_rad);
+        break;
+    case CMD_OFFSET:
+        // 界面统一使用度，控制算法仍使用 rad。
+        if (value < -180.0f || value > 180.0f)
+            return TUNING_OUT_OF_RANGE;
+        status = gimbal_tuning_set_gravity(state.gravity.gain, value * DEG_TO_RAD);
+        break;
+    case CMD_KI:
+        return gimbal_tuning_set_parameters(state.gravity.gain, state.gravity.offset_rad, value);
+    case CMD_PARAMETERS:
+        if (values[1] < -180.0f || values[1] > 180.0f)
+            return TUNING_OUT_OF_RANGE;
+        status = gimbal_tuning_set_parameters(value, values[1] * DEG_TO_RAD, values[2]);
+        break;
+    case CMD_SOURCE:
+        return select_source(value, &state);
+    case CMD_TARGET:
+        return submit_pitch(value * DEG_TO_RAD);
+    case CMD_STREAM:
+        // 115200 下 168 字节/帧，20 ms 周期约占 73% 带宽，禁止更快。
+        if (value != truncf(value))
+            return TUNING_BAD_PARAMETER;
+        if (value != 0.0f && (value < 20.0f || value > 2000.0f))
+            return TUNING_OUT_OF_RANGE;
+        stream_period_ms = (uint16_t)value;
+        return TUNING_OK;
+    case CMD_GRAVITY:
+        if (value == 0.0f)
+        {
+            status = gimbal_tuning_set_gravity(0.0f, state.gravity.offset_rad);
+            // 连续关闭仍保留最初的值，不把零当作待恢复值。
+            if (status == TUNING_OK && !saved_gravity_valid)
+            {
+                saved_gravity = state.gravity;
+                saved_gravity_valid = 1;
+            }
+            return status;
+        }
+        if (value != 1.0f || !saved_gravity_valid)
+            return TUNING_BAD_PARAMETER;
+        status = gimbal_tuning_set_gravity(saved_gravity.gain, saved_gravity.offset_rad);
+        break;
+    case CMD_MARK:
+        if (value != truncf(value) || value < 0.0f || value > 65535.0f)
+            return TUNING_OUT_OF_RANGE;
+        record_mark = (uint16_t)value;
+        return TUNING_OK;
+    default:
+        return TUNING_BAD_COMMAND;
+    }
+    // 手动修改重力参数后，旧的“恢复关闭前参数”不再有效。
+    if (status == TUNING_OK)
+        saved_gravity_valid = 0;
+    return status;
 }
 
-void tuning_service_request(const tuning_message_t *request, tuning_message_t *reply)
+void tuning_service_request(const tuning_message_t *request)
+{
+    const tuning_command_t *command = find_command(request->name);
+    ++command_count;
+    last_command = CMD_UNKNOWN;
+    last_status = request->status;
+    if (command != NULL)
+        last_command = command->id;
+    // 格式错误的整行不执行，仍在下一帧报告错误码。
+    if (last_status != TUNING_OK)
+        return;
+    if (command == NULL)
+    {
+        last_status = TUNING_BAD_COMMAND;
+        return;
+    }
+    if (request->count != command->count)
+    {
+        last_status = TUNING_BAD_LENGTH;
+        return;
+    }
+    last_status = execute_command(command->id, request->values);
+}
+
+uint16_t tuning_service_frame(uint8_t output[TUNING_FRAME_SIZE])
 {
     pitch_tuning_state_t state;
     pitch_tuning_limits_t limits;
-    const tuning_parameter_t *parameter;
-    uint16_t index, period;
-    float max_value;
-    uint8_t status = TUNING_OK;
+    const pitch_control_debug_t *control = &state.control;
+    float channels[TUNING_CHANNEL_COUNT];
+    uint16_t i;
 
-    reply->command = request->command | 0x80U;
-    reply->sequence = request->sequence;
-    reply->length = 1;
-    switch (request->command)
+    gimbal_tuning_get_state(&state);
+    gimbal_tuning_get_limits(&limits);
+    channels[0] = control->target_angle_rad * RAD_TO_DEG;
+    channels[1] = control->actual_angle_rad * RAD_TO_DEG;
+    channels[2] = control->angle_error_rad * RAD_TO_DEG;
+    channels[3] = control->requested_angle_rad * RAD_TO_DEG;
+    channels[4] = control->speed_rad_s;
+    channels[5] = control->p_out;
+    channels[6] = control->i_out;
+    channels[7] = control->d_out;
+    channels[8] = control->pid_unclamped_out;
+    channels[9] = control->gravity_target_out;
+    channels[10] = control->gravity_out;
+    channels[11] = control->friction_out;
+    channels[12] = control->total_unclamped_out;
+    channels[13] = control->total_out;
+    channels[14] = (float)control->motor_cmd;
+    channels[15] = state.gravity.gain;
+    channels[16] = state.gravity.offset_rad * RAD_TO_DEG;
+    channels[17] = state.speed_ki;
+    channels[18] = (float)state.source;
+    channels[19] = (float)state.remote_online;
+    channels[20] = (float)state.automatic;
+    channels[21] = (float)control->control_enabled;
+    channels[22] = (float)control->target_limited;
+    channels[23] = (float)control->integral_limited;
+    channels[24] = (float)control->pid_saturated;
+    channels[25] = (float)control->total_saturated;
+    channels[26] = (float)control->integral_blocked;
+    channels[27] = (float)control->integral_separated;
+    channels[28] = (float)control->gravity_limited;
+    channels[29] = (float)control->gravity_config_invalid;
+    channels[30] = (float)control->friction_still;
+    channels[31] = (float)control->friction_active;
+    channels[32] = (float)state.tick_ms * 0.001f;
+    channels[33] = (float)last_command;
+    channels[34] = (float)last_status;
+    channels[35] = (float)command_count;
+    channels[36] = (float)stream_period_ms;
+    channels[37] = (float)record_mark;
+    channels[38] = limits.pitch_min_rad * RAD_TO_DEG;
+    channels[39] = limits.pitch_max_rad * RAD_TO_DEG;
+    channels[40] = 1.0f;
+
+    // Inf 会被误认作帧尾；非有限值改为零，并标记整帧无效。
+    for (i = 0; i < TUNING_CHANNEL_COUNT - 1U; ++i)
     {
-    case TUNING_HELLO:
-        if (request->length != 0U) { status = TUNING_BAD_LENGTH; break; }
-        gimbal_tuning_get_limits(&limits);
-        reply->payload[1] = TUNING_VERSION;
-        tuning_write_u16(reply->payload + 2, (uint16_t)PARAMETER_COUNT);
-        tuning_write_float(reply->payload + 4, limits.pitch_min_rad);
-        tuning_write_float(reply->payload + 8, limits.pitch_max_rad);
-        tuning_write_float(reply->payload + 12, limits.gain_max);
-        tuning_write_float(reply->payload + 16, limits.offset_max_rad);
-        tuning_write_float(reply->payload + 20, limits.gravity_max_out);
-        tuning_write_float(reply->payload + 24, limits.total_max_out);
-        memcpy(reply->payload + 28, "gimbal-pitch", 13);
-        reply->length = 41;
-        break;
-    case TUNING_PARAM_INFO:
-        if (request->length != 2U) { status = TUNING_BAD_LENGTH; break; }
-        index = tuning_read_u16(request->payload);
-        if (index >= PARAMETER_COUNT) { status = TUNING_BAD_PARAMETER; break; }
-        parameter = &parameters[index];
-        gimbal_tuning_get_limits(&limits);
-        gimbal_tuning_get_state(&state);
-        max_value = parameter_max(&limits, parameter);
-        tuning_write_u16(reply->payload + 1, parameter->id);
-        reply->payload[3] = parameter->unit;
-        tuning_write_float(reply->payload + 4, parameter_min(max_value, parameter));
-        tuning_write_float(reply->payload + 8, max_value);
-        tuning_write_float(reply->payload + 12, parameter->step);
-        tuning_write_float(reply->payload + 16, parameter_value(&state, parameter));
-        memcpy(reply->payload + 20, parameter->name, strlen(parameter->name) + 1U);
-        reply->length = (uint16_t)(21U + strlen(parameter->name));
-        break;
-    case TUNING_PARAM_GET:
-        if (request->length != 2U) { status = TUNING_BAD_LENGTH; break; }
-        parameter = find_parameter(tuning_read_u16(request->payload));
-        if (parameter == NULL) { status = TUNING_BAD_PARAMETER; break; }
-        gimbal_tuning_get_state(&state);
-        tuning_write_u16(reply->payload + 1, parameter->id);
-        tuning_write_float(reply->payload + 3, parameter_value(&state, parameter));
-        reply->length = 7;
-        break;
-    case TUNING_PARAM_SET:
-        status = set_parameters(request, reply);
-        break;
-    case TUNING_STATE:
-        if (request->length != 0U) { status = TUNING_BAD_LENGTH; break; }
-        tuning_service_state(reply);
-        break;
-    case TUNING_STREAM:
-        if (request->length != 2U) { status = TUNING_BAD_LENGTH; break; }
-        period = tuning_read_u16(request->payload);
-        if (period != 0U && (period < 100U || period > 2000U))
-        { status = TUNING_OUT_OF_RANGE; break; }
-        stream_period_ms = period;
-        tuning_write_u16(reply->payload + 1, period);
-        reply->length = 3;
-        break;
-    case TUNING_SOURCE:
-        if (request->length != 1U) { status = TUNING_BAD_LENGTH; break; }
-        status = gimbal_tuning_set_source(request->payload[0]);
-        if (status == TUNING_OK) { reply->payload[1] = request->payload[0]; reply->length = 2; }
-        break;
-    case TUNING_VISION:
-        if (request->length != 8U) { status = TUNING_BAD_LENGTH; break; }
-        status = gimbal_tuning_submit_vision(request->payload);
-        break;
-    default:
-        status = TUNING_BAD_COMMAND;
-        break;
+        if (!isfinite(channels[i]))
+        {
+            channels[i] = 0.0f;
+            channels[40] = 0.0f;
+        }
     }
-    reply->payload[0] = status;
+    return tuning_encode(channels, output);
 }
 
 uint16_t tuning_service_period_ms(void)
