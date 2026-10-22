@@ -79,6 +79,18 @@
 #define PITCH_FRICTION_STILL_MS          100U      // 连续静止满这么久才算停住，单位ms
 #define PITCH_FRICTION_STILL_DRIFT_RAD   0.001745f // 约0.1°，静止计时期间允许的角度漂移
 
+// 开火门控：视觉允许开火、视觉帧没过期、云台已对准且保持一小段时间，才允许拨弹
+/* 允许误差（rad）= 允许偏离的半宽（m）/ 距离（m）- 散布角（rad），再做上下限。
+ * 半宽 = 装甲板实测半宽 × 0.7余量；视觉预测误差和散布也会让弹丸偏，所以不用满。 */
+#define FIRE_YAW_HALF_M_DEFAULT    0.047f  // 横宽13.5cm的一半6.75cm × 0.7
+#define FIRE_PITCH_HALF_M_DEFAULT  0.043f  // 竖向投影约12.3cm的一半6.15cm × 0.7
+#define FIRE_SPREAD_RAD_DEFAULT    0.0f    // 发射散布角，实测前先为0
+#define FIRE_MIN_RAD_DEFAULT       0.0052f // 约0.3°，算出来比它还小说明太远打不准，不开火
+#define FIRE_MAX_RAD_DEFAULT       0.0524f // 约3°，近处允许误差封顶
+#define FIRE_HOLD_MS_DEFAULT       10U     // 误差连续在范围内满这么久才开火，必须小于视觉帧间隔约42ms
+#define FIRE_FRAME_TIMEOUT_MS      100U    // 视觉帧超过这么久没更新，视为视觉掉线，不开火
+#define FIRE_DISTANCE_MAX_CM       1500U   // 距离超过15m视为数据错误
+
 // 位置环输出限幅
 #define YAW_AGL_SPD_MAX_OUT (50.0f)
 #define YAW_AGL_SPD_MAX_IOUT (11.7f)
@@ -197,6 +209,25 @@ static uint8_t pitch_still_valid;        // 0表示还没开始计时
 static uint32_t pitch_still_start_time;  // 本次静止从什么时候开始，ms
 static fp32 pitch_still_start_angle;     // 本次静止开始时的角度，rad
 
+// 开火门控参数，可在调试器里修改
+volatile fp32 fire_yaw_half_m = FIRE_YAW_HALF_M_DEFAULT;
+volatile fp32 fire_pitch_half_m = FIRE_PITCH_HALF_M_DEFAULT;
+volatile fp32 fire_spread_rad = FIRE_SPREAD_RAD_DEFAULT;
+volatile fp32 fire_min_rad = FIRE_MIN_RAD_DEFAULT;
+volatile fp32 fire_max_rad = FIRE_MAX_RAD_DEFAULT;
+volatile uint32_t fire_hold_ms = FIRE_HOLD_MS_DEFAULT;
+volatile fire_gate_debug_t fire_gate_debug; // 每周期刷新，只供观察
+// 最近一帧视觉数据中与开火有关的部分
+static uint8_t fire_frame_valid;     // 0表示还没收到过视觉帧
+static uint32_t fire_frame_time;     // 收到这一帧的时间，ms
+static uint8_t fire_frame_source;    // 这一帧来自CAN还是串口模拟
+static uint8_t fire_frame_fire;      // 视觉的fire字节，1表示视觉允许开火
+static uint16_t fire_frame_rev;      // 视觉的rev字段：bit0只瞄准不发射，bit1~15距离（cm）
+// 对准保持计时
+static uint8_t fire_hold_valid;      // 0表示还没开始计时
+static uint32_t fire_hold_start;     // 本次对准从什么时候开始，ms
+static volatile uint8_t fire_allowed; // 本周期是否允许开火，发射任务读取
+
 // PID参数数组
 static fp32 pitchSpdPIDco[3] = {PITCH_SPD_KP, PITCH_SPD_KI, PITCH_SPD_KD};
 static fp32 yawSpdPIDco[3] = {YAW_SPD_KP, YAW_SPD_KI, YAW_SPD_KD};
@@ -221,6 +252,8 @@ static void initGimbalCtrl(void);
 void refreshAngleStates(struct GimbalMotorCtrl_s *c);
 void getControlAngles(void);
 void unitPID_calc(void);
+static void recordFireFrame(const CAN_Send_to_MCU *frame, uint8_t source);
+static void updateFireGate(void);
 
 fp32 delta_pitch, delta_yaw;
 /**
@@ -272,6 +305,9 @@ void gimbal_task(void const *pvParameters)
 
         // 计算PID
         unitPID_calc();
+
+        // 判断是否允许开火，要用unitPID_calc限幅后的Pitch目标
+        updateFireGate();
 
         // 遥控器在线侦测
 		// LYL
@@ -531,6 +567,9 @@ void getControlAngles(void)
 		// LYL
         if (NX_TakeControlFrame(&frame, &frame_source))
         {
+            // 记下这一帧的开火请求、距离和到达时间，供开火门控使用
+            recordFireFrame(&frame, frame_source);
+
             delta_pitch = -(float)frame.pitch * 3.1415926f / 32767 - PitchCtrl.nowAbsoluteAngle;
             delta_yaw = (float)frame.yaw * 3.1415926f / 32767 - YawCtrl.nowAbsoluteAngle;
             
@@ -1031,6 +1070,212 @@ void unitPID_calc(void)
     debug.motor_cmd = PitchCtrl.Volt_out;
     debug.control_enabled = 1;
     pitch_control_debug = debug;
+}
+
+/**
+ * @brief 记录最近一帧视觉数据中与开火有关的部分
+ */
+static void recordFireFrame(const CAN_Send_to_MCU *frame, uint8_t source)
+{
+    fire_frame_time = PitchCtrl.nowTime;
+    fire_frame_source = source;
+    fire_frame_fire = frame->fire;
+    fire_frame_rev = (uint16_t)frame->rev; // 按无符号数解析各位
+    fire_frame_valid = 1;
+}
+
+/**
+ * @brief 按距离算出一个轴的允许误差
+ * @param halfSize 允许偏离的半宽或半高，单位m
+ * @param distance 目标距离，单位m，调用前已检查大于0
+ * @return 允许误差，单位rad；参数填错时返回0，相当于不开火
+ */
+static fp32 calcFireThreshold(fp32 halfSize, fp32 distance)
+{
+    // 距离较远时角度很小，直接用 半宽/距离 代替反正切，误差可以忽略
+    const fp32 threshold = halfSize / distance - fire_spread_rad;
+
+    // 参数填错导致结果不是有效数字，返回0，后面会判定为不开火
+    if (!isfinite(threshold))
+    {
+        return 0.0f;
+    }
+
+    // 近处允许误差封顶，避免阈值太宽乱打
+    if (threshold > fire_max_rad)
+    {
+        return fire_max_rad;
+    }
+
+    return threshold;
+}
+
+/**
+ * @brief 检查本周期是否满足开火的全部条件（不含保持时间）
+ * @return 1表示全部满足
+ */
+static uint8_t checkFireWindow(fire_gate_debug_t *debug)
+{
+    // 不在自瞄、遥控掉线或无力时，不开火
+    if (robotIsAuto() == 0)
+    {
+        return 0;
+    }
+    if (rc_online == 0)
+    {
+        return 0;
+    }
+    if (PitchCtrl.nopowerflag == 1)
+    {
+        return 0;
+    }
+
+    // 还没收到过视觉帧
+    if (fire_frame_valid == 0)
+    {
+        return 0;
+    }
+
+    // 串口模拟只用于调云台，不允许开火
+    if (fire_frame_source != NX_SOURCE_CAN)
+    {
+        return 0;
+    }
+
+    // 视觉帧太久没更新，可能视觉已掉线，不能沿用旧的开火请求
+    const uint32_t frameAge = PitchCtrl.nowTime - fire_frame_time;
+    debug->frame_age_ms = frameAge;
+    if (frameAge > FIRE_FRAME_TIMEOUT_MS)
+    {
+        return 0;
+    }
+    debug->frame_fresh = 1;
+
+    // 视觉没有允许开火（例如没识别到目标）
+    if (fire_frame_fire != 1)
+    {
+        return 0;
+    }
+    debug->vision_fire = 1;
+
+    // 视觉要求这次只瞄准不发射
+    const uint16_t aimOnly = fire_frame_rev & 0x0001;
+    if (aimOnly == 1)
+    {
+        return 0;
+    }
+
+    // 取出距离：rev的bit1~15，单位cm；0表示视觉没给距离
+    const uint16_t distanceCm = fire_frame_rev >> 1;
+    if (distanceCm == 0)
+    {
+        return 0;
+    }
+    // 距离大得不合理，按数据错误处理
+    if (distanceCm > FIRE_DISTANCE_MAX_CM)
+    {
+        return 0;
+    }
+    const fp32 distance = (fp32)distanceCm * 0.01f;
+    debug->distance_m = distance;
+    debug->distance_valid = 1;
+
+    // 按距离算两个轴的允许误差
+    const fp32 yawThreshold = calcFireThreshold(fire_yaw_half_m, distance);
+    const fp32 pitchThreshold = calcFireThreshold(fire_pitch_half_m, distance);
+    debug->yaw_threshold_rad = yawThreshold;
+    debug->pitch_threshold_rad = pitchThreshold;
+
+    // 下限或上限填错（不是有效数字），不开火
+    if (!isfinite(fire_min_rad))
+    {
+        return 0;
+    }
+    if (!isfinite(fire_max_rad))
+    {
+        return 0;
+    }
+    // 允许误差比下限还小，说明太远打不准，不开火
+    if (yawThreshold < fire_min_rad)
+    {
+        return 0;
+    }
+    if (pitchThreshold < fire_min_rad)
+    {
+        return 0;
+    }
+    debug->threshold_ok = 1;
+
+    // 两个轴离目标角各差多少，Pitch目标已经过限幅
+    const fp32 yawError = fabsf(radFormat(YawCtrl.want_AbsoluteAngleCtrl - YawCtrl.nowAbsoluteAngle));
+    const fp32 pitchError = fabsf(radFormat(PitchCtrl.want_AbsoluteAngleCtrl - PitchCtrl.nowAbsoluteAngle));
+    debug->yaw_error_rad = yawError;
+    debug->pitch_error_rad = pitchError;
+
+    // Yaw还没对准
+    if (yawError > yawThreshold)
+    {
+        return 0;
+    }
+    // Pitch还没对准
+    if (pitchError > pitchThreshold)
+    {
+        return 0;
+    }
+    debug->aimed = 1;
+
+    return 1;
+}
+
+/**
+ * @brief 每个控制周期判断一次是否允许开火
+ *
+ * 条件全部满足、并且连续保持满 fire_hold_ms 才允许开火，
+ * 避免云台冲过目标的一瞬间误差经过0时开火。任何一条不满足，计时清零。
+ */
+static void updateFireGate(void)
+{
+    fire_gate_debug_t debug = {0};
+    const uint8_t inWindow = checkFireWindow(&debug);
+
+    // 本周期条件不满足：计时清零，不允许开火
+    if (inWindow == 0)
+    {
+        fire_hold_valid = 0;
+        fire_allowed = 0;
+        fire_gate_debug = debug;
+        return;
+    }
+
+    // 刚满足条件：从现在开始计时
+    if (fire_hold_valid == 0)
+    {
+        fire_hold_start = PitchCtrl.nowTime;
+        fire_hold_valid = 1;
+    }
+
+    // 保持时间还不够，继续等
+    const uint32_t holdTime = PitchCtrl.nowTime - fire_hold_start;
+    debug.hold_ms = holdTime;
+    if (holdTime < fire_hold_ms)
+    {
+        fire_allowed = 0;
+        fire_gate_debug = debug;
+        return;
+    }
+
+    fire_allowed = 1;
+    debug.allowed = 1;
+    fire_gate_debug = debug;
+}
+
+/**
+ * @brief 供发射任务查询：本周期是否允许开火
+ * @return 1表示允许
+ */
+uint8_t gimbal_fire_allowed(void)
+{
+    return fire_allowed;
 }
 
 /**

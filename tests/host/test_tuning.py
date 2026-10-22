@@ -72,7 +72,7 @@ uint8_t fire_t;
     funcs = '\n'.join(function(nx, name) for name in (
         'NX_GetSource', 'NX_SelectSource', 'NX_ReceiveFrame', 'NX_TakeControlFrame'))
     funcs += '\n' + '\n'.join(function(source, name) for name in (
-        'getControlAngles', 'gimbal_tuning_is_enabled', 'gimbal_tuning_get_state',
+        'recordFireFrame', 'getControlAngles', 'gimbal_tuning_is_enabled', 'gimbal_tuning_get_state',
         'gimbal_tuning_get_limits', 'gimbal_tuning_set_gravity', 'gimbal_tuning_set_parameters',
         'gimbal_tuning_set_source', 'gimbal_tuning_submit_vision'))
     tests = r'''
@@ -229,6 +229,8 @@ static void test_control(void)
     assert(NX_ReceiveFrame(can_payload, NX_SOURCE_CAN));
     getControlAngles(); assert(fabsf(PitchCtrl.want_AbsoluteAngleCtrl + 0.2f) < 0.0001f);
     assert(YawCtrl.want_AbsoluteAngleCtrl == 0 && fire_t == 1);
+    /* 自瞄收到的 CAN 帧要同时记给开火门控。 */
+    assert(fire_frame_valid && fire_frame_source == NX_SOURCE_CAN && fire_frame_fire == 1);
     assert(PitchCtrl.spd_pid.Ki == 0.0f);
     assert(irq_key == 0);
 }

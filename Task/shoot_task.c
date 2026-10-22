@@ -18,6 +18,7 @@
 #include "robot_total_mode.h"
 #include "CAN_recieve_send.h"
 #include "INS_task.h"
+#include "gimbal_task.h"
 #include "main.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -149,8 +150,12 @@ static void getInstruction(void)
 	{
 		if(fire_t == 1)
 		{
-			triggerMode = TriggerMode_e_ShootOne;
 			fire_t = 0;//凌晨写的逻辑，我觉得有问题
+			// 视觉允许开火后，还要云台这边确认已经对准，才打这一发
+			if (gimbal_fire_allowed() == 1)
+			{
+				triggerMode = TriggerMode_e_ShootOne;
+			}
 		}
 	}
 }
@@ -230,7 +235,8 @@ void static triggerModeChange(void)
             }
             if((robotIsAuto() == 1))
             {
-                if(nx_p->fire == 1)
+                // 开火门控里已经检查了：视觉fire位、视觉帧是否过期、距离和两轴误差
+                if (gimbal_fire_allowed() == 1)
                 {
                     triggerMode = TriggerMode_e_ShootOne;
                 }

@@ -63,6 +63,37 @@ extern volatile fp32 pitch_friction_up_out;
 extern volatile fp32 pitch_friction_down_out;
 extern volatile fp32 pitch_friction_error_rad;
 
+/* 开火门控的调试记录，每个控制周期刷新，只供观察。标志为1表示该条件已满足。
+ * 条件按顺序检查，前面一条不满足时，后面的字段保持为0。 */
+typedef struct
+{
+    uint32_t frame_age_ms;     // 最近一帧视觉数据距现在多久
+    fp32 distance_m;           // 视觉给的距离
+    fp32 yaw_threshold_rad;    // 按距离算出的Yaw允许误差
+    fp32 pitch_threshold_rad;  // 按距离算出的Pitch允许误差
+    fp32 yaw_error_rad;        // Yaw离目标角多远（绝对值）
+    fp32 pitch_error_rad;      // Pitch离目标角多远（绝对值）
+    uint32_t hold_ms;          // 已经连续对准多久
+    uint8_t frame_fresh;       // 视觉帧没有过期
+    uint8_t vision_fire;       // 视觉允许开火（fire=1）
+    uint8_t distance_valid;    // 距离有效
+    uint8_t threshold_ok;      // 允许误差不小于下限（不算太远）
+    uint8_t aimed;             // 两个轴都在允许误差内
+    uint8_t allowed;           // 最终允许开火
+} fire_gate_debug_t;
+
+/* 开火门控参数：允许误差 = 半宽(m)/距离(m) - 散布角(rad)，再限制在[下限, 上限]。
+ * 低于下限说明太远，不开火。fire_hold_ms为需要连续对准的时间。 */
+extern volatile fp32 fire_yaw_half_m;
+extern volatile fp32 fire_pitch_half_m;
+extern volatile fp32 fire_spread_rad;
+extern volatile fp32 fire_min_rad;
+extern volatile fp32 fire_max_rad;
+extern volatile uint32_t fire_hold_ms;
+extern volatile fire_gate_debug_t fire_gate_debug;
+/* 发射任务查询本周期是否允许开火：视觉允许、帧未过期、两轴已对准并保持。 */
+uint8_t gimbal_fire_allowed(void);
+
 /* 调参任务读取一致的快照；不会把调试结构体作为控制输入。 */
 typedef struct
 {

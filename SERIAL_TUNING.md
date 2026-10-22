@@ -142,7 +142,7 @@ CRC 初始值 `0xFFFF`，多项式 `0x1021`，无反射、无末尾异或；覆�
 
 HELLO 的 6 个 float 顺序为 Pitch 最小/最大角、gain 最大绝对值、offset 最大绝对值、补偿输出上限、总输出上限。参数单位 0=输出刻度，1=rad。参数表新增项需同步其读写存储、验证规则和能力数量；协议本身不需要增加专用命令。
 
-视觉载荷为 `mode:u8, yaw:i16, pitch:i16, fire:u8, rev:i16`。模拟只接受 `mode=1, fire=0, rev=0`；Pitch 换算仍为 `-pitch_raw*π/32767`，Yaw 字段在串口模拟中不应用。
+视觉载荷为 `mode:u8, yaw:i16, pitch:i16, fire:u8, rev:i16`。真实视觉的 `rev` 按无符号数：bit0 只瞄准不发射，bit1～15 为目标距离（cm），见 README“自瞄开火门控”。模拟只接受 `mode=1, fire=0, rev=0`；Pitch 换算仍为 `-pitch_raw*π/32767`，Yaw 字段在串口模拟中不应用。
 
 状态快照布局可用 Python `struct.unpack('<BIBBBH15fhf', payload)` 解析，共 76 字节：status:u8、tick_ms:u32、source:u8、remote_online:u8、automatic:u8、flags:u16、15 个 float、motor_cmd:i16、speed_ki:float。automatic 表示当前满足串口自瞄入口条件。
 

@@ -43,7 +43,10 @@ prefix = r'''
 #include <string.h>
 #include "pid.h"
 #include "gimbal_task.h"
+#include "NX_communicate.h"
 #define PI 3.14159265358979323846f
+static int test_auto = 1; /* 模拟 robotIsAuto() */
+int robotIsAuto(void) { return test_auto; }
 typedef struct { float unused; } first_order_filter_type_t;
 volatile uint8_t rc_online = 1;
 '''
@@ -52,7 +55,9 @@ declarations = source[source.index('#define GIMBAL_TASK_CTRL_TIME'):
 functions = '\n'.join(function(name) for name in (
     'radFormat', 'gimbal_PID_calc', 'calcPitchGravity',
     'restartPitchStillTimer', 'isPitchStill', 'checkFrictionThreshold', 'calcPitchFriction',
-    'limitPitchOutput', 'pitch_speed_pid_calc', 'unitPID_calc'))
+    'limitPitchOutput', 'pitch_speed_pid_calc', 'unitPID_calc',
+    'recordFireFrame', 'calcFireThreshold', 'checkFireWindow', 'updateFireGate',
+    'gimbal_fire_allowed'))
 tests = r'''
 static void near_value_at(float a, float b, int line)
 {
@@ -289,6 +294,195 @@ static void friction_tests(void)
     assert(!pitch_control_debug.friction_active);
     run_ms(4);
     assert(pitch_control_debug.friction_active);
+}
+
+/* 开火门控用例：自瞄、两轴误差为0、默认参数。 */
+static void setup_fire(void)
+{
+    setup_default();
+    test_auto = 1;
+    fire_yaw_half_m = FIRE_YAW_HALF_M_DEFAULT;
+    fire_pitch_half_m = FIRE_PITCH_HALF_M_DEFAULT;
+    fire_spread_rad = FIRE_SPREAD_RAD_DEFAULT;
+    fire_min_rad = FIRE_MIN_RAD_DEFAULT;
+    fire_max_rad = FIRE_MAX_RAD_DEFAULT;
+    fire_hold_ms = FIRE_HOLD_MS_DEFAULT;
+    fire_frame_valid = 0;
+    fire_hold_valid = 0;
+    fire_allowed = 0;
+    PitchCtrl.nowTime = 1000;
+}
+
+/* 模拟视觉发来一帧：fire 字节、只瞄准位、距离（cm）。 */
+static void send_frame(uint8_t fire, uint16_t aim_only, uint16_t distance_cm, uint8_t source)
+{
+    CAN_Send_to_MCU frame = {0};
+    frame.fire = fire;
+    frame.rev = (int16_t)(uint16_t)((distance_cm << 1) | aim_only);
+    recordFireFrame(&frame, source);
+}
+
+/* 推进 n 个 2 ms 控制周期，每周期判断一次。 */
+static void fire_cycles(int n)
+{
+    for (int i = 0; i < n; ++i) {
+        PitchCtrl.nowTime += 2;
+        updateFireGate();
+    }
+}
+
+/* 发一帧后跑足够多周期，返回是否允许开火。 */
+static uint8_t fire_after_frame(uint8_t fire, uint16_t aim_only, uint16_t distance_cm)
+{
+    send_frame(fire, aim_only, distance_cm, NX_SOURCE_CAN);
+    fire_cycles(10);
+    return gimbal_fire_allowed();
+}
+
+static void fire_gate_tests(void)
+{
+    /* 正常：3 m、两轴已对准，连续满 10 ms 才允许；阈值按 半宽/距离 计算。 */
+    setup_fire();
+    send_frame(1, 0, 300, NX_SOURCE_CAN);
+    fire_cycles(5); /* 已保持 8 ms */
+    assert(!gimbal_fire_allowed() && fire_gate_debug.aimed && !fire_gate_debug.allowed);
+    fire_cycles(1); /* 已保持 10 ms */
+    assert(gimbal_fire_allowed() && fire_gate_debug.allowed);
+    near_value(fire_gate_debug.distance_m, 3.0f);
+    near_value(fire_gate_debug.yaw_threshold_rad, 0.047f / 3.0f);
+    near_value(fire_gate_debug.pitch_threshold_rad, 0.043f / 3.0f);
+
+    /* 任一轴误差超过自己的阈值都不允许；误差略小于阈值允许。 */
+    const float yaw_th = 0.047f / 3.0f;
+    const float pitch_th = 0.043f / 3.0f;
+    setup_fire();
+    YawCtrl.want_AbsoluteAngleCtrl = yaw_th + 0.0002f;
+    assert(!fire_after_frame(1, 0, 300) && !fire_gate_debug.aimed);
+    YawCtrl.want_AbsoluteAngleCtrl = -(yaw_th - 0.0002f);
+    assert(fire_after_frame(1, 0, 300));
+    YawCtrl.want_AbsoluteAngleCtrl = 0;
+    PitchCtrl.want_AbsoluteAngleCtrl = pitch_th + 0.0002f;
+    assert(!fire_after_frame(1, 0, 300));
+    PitchCtrl.want_AbsoluteAngleCtrl = pitch_th - 0.0002f;
+    assert(fire_after_frame(1, 0, 300));
+
+    /* Yaw 跨 ±π 时按最短角度算误差。 */
+    setup_fire();
+    YawCtrl.want_AbsoluteAngleCtrl = 3.14f;
+    YawCtrl.nowAbsoluteAngle = -3.14f;
+    assert(fire_after_frame(1, 0, 300));
+    near_value(fire_gate_debug.yaw_error_rad, 2 * PI - 6.28f);
+
+    /* 远处：允许误差低于下限 0.3° 就不开火。8 m 两轴都够，9 m Pitch 不够，10 m 都不够。 */
+    setup_fire();
+    assert(fire_after_frame(1, 0, 800));
+    assert(!fire_after_frame(1, 0, 900) && fire_gate_debug.distance_valid && !fire_gate_debug.threshold_ok);
+    assert(!fire_after_frame(1, 0, 1000));
+
+    /* 近处：允许误差封顶 3°。 */
+    setup_fire();
+    assert(fire_after_frame(1, 0, 50));
+    near_value(fire_gate_debug.yaw_threshold_rad, FIRE_MAX_RAD_DEFAULT);
+    near_value(fire_gate_debug.pitch_threshold_rad, FIRE_MAX_RAD_DEFAULT);
+
+    /* 散布角从阈值里减掉。 */
+    setup_fire();
+    fire_spread_rad = 0.002f;
+    assert(fire_after_frame(1, 0, 300));
+    near_value(fire_gate_debug.yaw_threshold_rad, 0.047f / 3.0f - 0.002f);
+
+    /* 视觉不允许开火、只瞄准不发射、没给距离、距离不合理：都不开火。 */
+    setup_fire();
+    assert(!fire_after_frame(0, 0, 300) && fire_gate_debug.frame_fresh && !fire_gate_debug.vision_fire);
+    assert(!fire_after_frame(1, 1, 300));
+    assert(!fire_after_frame(1, 0, 0));
+    assert(!fire_after_frame(1, 0, FIRE_DISTANCE_MAX_CM + 1));
+    assert(!fire_after_frame(1, 0, 0x7FFF)); /* 最高位为1，int16为负数也按无符号处理 */
+    assert(fire_after_frame(1, 0, FIRE_DISTANCE_MAX_CM) == 0); /* 15 m 太远，低于下限 */
+    assert(fire_gate_debug.distance_valid);
+
+    /* 距离为 0 本身就判无效（不靠后面除以 0 的结果兜底）。 */
+    setup_fire();
+    assert(!fire_after_frame(1, 0, 0) && !fire_gate_debug.distance_valid);
+    /* 距离上限独立生效：把半宽调大，使 15 m 以外阈值也够，仍按数据错误拒绝。 */
+    setup_fire();
+    fire_yaw_half_m = 1.0f;
+    fire_pitch_half_m = 1.0f;
+    assert(fire_after_frame(1, 0, FIRE_DISTANCE_MAX_CM));
+    assert(!fire_after_frame(1, 0, FIRE_DISTANCE_MAX_CM + 1) && !fire_gate_debug.distance_valid);
+
+    /* 串口模拟来源不开火。 */
+    setup_fire();
+    send_frame(1, 0, 300, NX_SOURCE_UART);
+    fire_cycles(10);
+    assert(!gimbal_fire_allowed());
+
+    /* 没收到过视觉帧不开火（即使帧缓存里残留着看起来有效的数据）。 */
+    setup_fire();
+    send_frame(1, 0, 300, NX_SOURCE_CAN);
+    fire_frame_valid = 0;
+    fire_cycles(10);
+    assert(!gimbal_fire_allowed());
+
+    /* 视觉帧超过 100 ms 没更新：不能沿用旧的 fire=1。 */
+    setup_fire();
+    assert(fire_after_frame(1, 0, 300)); /* 帧已过去 20 ms */
+    fire_cycles(40); /* 100 ms */
+    assert(gimbal_fire_allowed());
+    fire_cycles(1);  /* 102 ms */
+    assert(!gimbal_fire_allowed() && !fire_gate_debug.frame_fresh);
+
+    /* 退出自瞄、遥控掉线、无力：不开火，恢复后要重新保持满 10 ms。 */
+    for (int which = 0; which < 3; ++which) {
+        setup_fire();
+        assert(fire_after_frame(1, 0, 300));
+        if (which == 0) test_auto = 0;
+        if (which == 1) rc_online = 0;
+        if (which == 2) PitchCtrl.nopowerflag = 1;
+        fire_cycles(1);
+        assert(!gimbal_fire_allowed());
+        test_auto = 1;
+        rc_online = 1;
+        PitchCtrl.nopowerflag = 0;
+        send_frame(1, 0, 300, NX_SOURCE_CAN);
+        fire_cycles(5);
+        assert(!gimbal_fire_allowed());
+        fire_cycles(1);
+        assert(gimbal_fire_allowed());
+    }
+
+    /* 误差短暂超出一个周期：保持计时清零。 */
+    setup_fire();
+    assert(fire_after_frame(1, 0, 300));
+    YawCtrl.want_AbsoluteAngleCtrl = 0.1f;
+    fire_cycles(1);
+    assert(!gimbal_fire_allowed());
+    YawCtrl.want_AbsoluteAngleCtrl = 0;
+    fire_cycles(5);
+    assert(!gimbal_fire_allowed());
+    fire_cycles(1);
+    assert(gimbal_fire_allowed());
+
+    /* 保持时间设为 0：第一次满足条件就允许。 */
+    setup_fire();
+    fire_hold_ms = 0;
+    send_frame(1, 0, 300, NX_SOURCE_CAN);
+    fire_cycles(1);
+    assert(gimbal_fire_allowed());
+
+    /* 参数填错（非数）一律不开火。 */
+    setup_fire();
+    fire_yaw_half_m = NAN;
+    assert(!fire_after_frame(1, 0, 300));
+    setup_fire();
+    fire_spread_rad = NAN;
+    assert(!fire_after_frame(1, 0, 300));
+    setup_fire();
+    fire_min_rad = NAN;
+    assert(!fire_after_frame(1, 0, 300));
+    setup_fire();
+    fire_max_rad = NAN;
+    assert(!fire_after_frame(1, 0, 300));
 }
 
 int main(void)
@@ -561,8 +755,9 @@ int main(void)
     pitch_i_separation_rad = PITCH_I_SEPARATION_RAD_DEFAULT;
 
     friction_tests();
+    fire_gate_tests();
 
-    puts("PASS: static friction fill-to-threshold; compensation-off matches baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
+    puts("PASS: fire gate; static friction fill-to-threshold; compensation-off matches baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
 }
 '''
 (out / 'test.c').write_text(prefix + declarations + functions + tests, encoding='utf-8')
