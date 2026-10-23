@@ -11,7 +11,8 @@ OUT = ROOT / 'build/host-tuning'
 
 
 def function(source, name):
-    match = re.search(r'^(?:static )?(?:uint8_t|void) ' + name + r'\([^;]*?\)\s*\{', source, re.M)
+    match = re.search(r'^(?:static )?(?:uint8_t|void|fp32) ' + name +
+                      r'\([^;]*?\)\s*(?://[^\n]*\n\s*)?\{', source, re.M)
     assert match, name
     end, depth = match.end(), 1
     while depth:
@@ -71,7 +72,8 @@ uint8_t fire_t;
     funcs = '\n'.join(function(nx, name) for name in (
         'NX_GetSource', 'NX_VisionOnline', 'NX_SelectSource', 'NX_ReceiveFrame', 'NX_TakeControlFrame'))
     funcs += '\n' + '\n'.join(function(source, name) for name in (
-        'gimbal_tuning_is_enabled', 'updateYawWave', 'recordFireFrame', 'getControlAngles', 'gimbal_tuning_get_state',
+        'radFormat', 'gimbal_tuning_is_enabled', 'updateYawWave', 'recordFireFrame', 'recordYawFrame',
+        'updateYawVisionMotion', 'getControlAngles', 'gimbal_tuning_get_state',
         'gimbal_tuning_get_limits', 'gimbal_tuning_set_gravity', 'gimbal_tuning_set_parameters',
         'gimbal_tuning_stop_yaw_wave', 'gimbal_tuning_set_source', 'gimbal_tuning_submit_vision',
         'gimbal_tuning_start_yaw_wave', 'gimbal_tuning_keep_yaw_wave'))
@@ -191,6 +193,10 @@ int main(int argc, char **argv)
             command("yaw_ping:0\n", TUNING_OK);
         getControlAngles();
         near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.2f + 3 * PI / 180 * sinf(2 * PI * 30 * tick / 1000));
+        /* 波形测试时，前馈用的目标角速度、角加速度按公式精确给出。 */
+        assert(yaw_target_source == YAW_TARGET_SOURCE_WAVE);
+        near_value(yaw_target_speed / 100, 3 * PI / 180 * 2 * PI * 30 * cosf(2 * PI * 30 * tick / 1000) / 100);
+        near_value(yaw_target_accel / 10000, -3 * PI / 180 * 2 * PI * 30 * 2 * PI * 30 * sinf(2 * PI * 30 * tick / 1000) / 10000);
         near_value(PitchCtrl.want_AbsoluteAngleCtrl, 5 * PI / 180);
         assert(NX_data.fire == 0 && NX_data.rev == 0);
     }
@@ -242,9 +248,11 @@ int main(int argc, char **argv)
     command(boundary, TUNING_OK);
     getControlAngles();
     assert(PitchCtrl.want_AbsoluteAngleCtrl >= PITCH_MIN_ANGLE);
+    assert(yaw_frame_valid); /* 自瞄时收过帧 */
     rc.rc.s[1] = 1;
     getControlAngles();
     assert(NX_GetSource() == NX_SOURCE_CAN);
+    assert(!yaw_frame_valid); /* 退出自瞄清掉帧记录，重新进入后不拿旧帧估速度 */
     command("target:0\n", TUNING_NOT_ENABLED);
     command("yaw:0\n", TUNING_NOT_ENABLED);
     rc.rc.s[1] = 2;
@@ -313,6 +321,7 @@ int main(int argc, char **argv)
     YawCtrl.nowAbsoluteAngle = -179 * PI / 180;
     YawCtrl.want_AbsoluteAngleCtrl = 179 * PI / 180;
     YawCtrl.agl_pid.out = 0.0005f;
+    yaw_speed_setpoint = 0.0005f; /* 速度环目标 = 位置环输出 + 速度前馈；前馈关闭时两者相同 */
     YawCtrl.radspeed = -0.00025f;
     YawCtrl.spd_pid.Pout = 31000;
     YawCtrl.Volt_out = 20000;

@@ -55,7 +55,8 @@ declarations = source[source.index('#define GIMBAL_TASK_CTRL_TIME'):
 functions = '\n'.join(function(name) for name in (
     'radFormat', 'gimbal_PID_calc', 'calcPitchGravity',
     'resetFrictionState', 'restartStillTimer', 'isAxisStill', 'checkFrictionThreshold',
-    'calcFrictionFill',
+    'calcFrictionFill', 'recordYawFrame', 'updateYawVisionMotion', 'checkFeedforwardGain',
+    'calcYawSpeedFeedforward', 'calcYawOutputFeedforward',
     'limitPitchOutput', 'pitch_speed_pid_calc', 'unitPID_calc',
     'recordFireFrame', 'calcFireThreshold', 'checkFireWindow', 'updateFireGate',
     'gimbal_fire_allowed'))
@@ -91,6 +92,17 @@ static void setup_default(void)
     yaw_friction_error_rad = YAW_FRICTION_ERROR_RAD_DEFAULT;
     resetFrictionState(&pitch_friction_state);
     resetFrictionState(&yaw_friction_state);
+    /* 前馈显式关闭，目标运动清零。 */
+    yaw_ff_speed_gain = 0;
+    yaw_ff_out_gain = 0;
+    yaw_ff_inertia = YAW_FF_INERTIA_DEFAULT;
+    yaw_ff_back_emf = YAW_FF_BACK_EMF_DEFAULT;
+    yaw_ff_friction = YAW_FF_FRICTION_DEFAULT;
+    yaw_ff_interp = 0;
+    yaw_target_speed = 0;
+    yaw_target_accel = 0;
+    yaw_target_source = YAW_TARGET_SOURCE_NONE;
+    yaw_frame_valid = 0;
     test_pitch_rpm = 0;
     test_yaw_rpm = 0;
     PitchCtrl.SpeedRpmPoint = &test_pitch_rpm;
@@ -322,48 +334,52 @@ static void setup_yaw_friction(float error_rad)
     setup_default();
     yaw_friction_pos_out = 1500;
     yaw_friction_neg_out = 2000;
+    /* 死区单独设小：Kp 较大时，默认死区边缘的 PID 输出就已超过门槛，用例会测不到补偿。 */
+    yaw_friction_error_rad = 0.002f;
     YawCtrl.want_AbsoluteAngleCtrl = error_rad;
 }
 
 static void yaw_friction_tests(void)
 {
     const float yaw_gain = YAW_SPD_KP * YAW_AGL_KP; /* 每 rad 误差对应的输出 */
+    /* 误差按当前 Kp 反推，让 PID 输出正好是 1000，低于两个门槛；改 Kp 不影响用例。 */
+    const float e1 = 1000.0f / yaw_gain;
 
     /* 门槛为0时与原来的 Yaw 输出完全一致（由 setup_default 的基线用例覆盖），这里再看一次停住后。 */
     setup_default();
-    YawCtrl.want_AbsoluteAngleCtrl = 0.01f;
+    YawCtrl.want_AbsoluteAngleCtrl = e1;
     run_ms(200);
     assert(!yaw_friction_state.active);
-    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * 0.01f));
+    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * e1));
 
     /* 正方向：停住满 100 ms 后补到门槛 1500；Pitch 的门槛不影响 Yaw。 */
-    setup_yaw_friction(0.01f);
+    setup_yaw_friction(e1);
     pitch_friction_up_out = 4000;
     run_ms(98);
     assert(!yaw_friction_state.still && !yaw_friction_state.active);
-    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * 0.01f));
+    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * e1));
     run_ms(4);
     assert(yaw_friction_state.still && yaw_friction_state.active);
-    near_value(yaw_friction_state.out, 1500 - yaw_gain * 0.01f);
+    near_value(yaw_friction_state.out, 1500 - yaw_gain * e1);
     assert(YawCtrl.Volt_out == 1500);
     assert(!pitch_control_debug.friction_active);
 
     /* 负方向用自己的门槛 2000。 */
-    setup_yaw_friction(-0.01f);
+    setup_yaw_friction(-e1);
     run_ms(200);
     assert(YawCtrl.Volt_out == -2000);
 
     /* 死区内不补；PID 已超过门槛不补。 */
-    setup_yaw_friction(0.005f);
+    setup_yaw_friction(0.001f) /* 小于死区 0.002 */;
     run_ms(200);
     assert(yaw_friction_state.still && !yaw_friction_state.active);
-    setup_yaw_friction(0.02f);
+    setup_yaw_friction(2000.0f / yaw_gain) /* PID 2000，超过门槛 1500 */;
     run_ms(200);
     assert(!yaw_friction_state.active);
-    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * 0.02f));
+    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * (2000.0f / yaw_gain)));
 
     /* 电机相对底盘在转（例如小陀螺时底盘在下面转）：不算停住，不补。 */
-    setup_yaw_friction(0.01f);
+    setup_yaw_friction(e1);
     test_yaw_rpm = 3;
     run_ms(200);
     assert(!yaw_friction_state.still && !yaw_friction_state.active);
@@ -371,16 +387,16 @@ static void yaw_friction_tests(void)
     /* 角度跨过 ±180°：差值按最短角度算，不会被误判为在动。 */
     setup_yaw_friction(0);
     YawCtrl.nowAbsoluteAngle = PI - 0.0005f;
-    YawCtrl.want_AbsoluteAngleCtrl = PI - 0.0005f - 0.01f;
+    YawCtrl.want_AbsoluteAngleCtrl = PI - 0.0005f - e1;
     run_ms(60);
     YawCtrl.nowAbsoluteAngle = -PI + 0.0005f;
-    YawCtrl.want_AbsoluteAngleCtrl = -PI + 0.0005f - 0.01f;
+    YawCtrl.want_AbsoluteAngleCtrl = -PI + 0.0005f - e1;
     run_ms(60);
     assert(yaw_friction_state.still && yaw_friction_state.active);
 
     /* 无力或遥控掉线：输出为0，恢复后要重新等满 100 ms。 */
     for (int which = 0; which < 2; ++which) {
-        setup_yaw_friction(0.01f);
+        setup_yaw_friction(e1);
         run_ms(200);
         assert(yaw_friction_state.active);
         if (which == 0) YawCtrl.nopowerflag = 1;
@@ -397,11 +413,11 @@ static void yaw_friction_tests(void)
     }
 
     /* Yaw 门槛填错按关闭处理。 */
-    setup_yaw_friction(0.01f);
+    setup_yaw_friction(e1);
     yaw_friction_pos_out = NAN;
     run_ms(200);
     assert(!yaw_friction_state.active);
-    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * 0.01f));
+    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * e1));
 }
 
 /* 开火门控用例：自瞄、两轴误差为0、默认参数。 */
@@ -411,7 +427,7 @@ static void setup_fire(void)
     test_auto = 1;
     fire_yaw_half_m = FIRE_YAW_HALF_M_DEFAULT;
     fire_pitch_half_m = FIRE_PITCH_HALF_M_DEFAULT;
-    fire_spread_rad = FIRE_SPREAD_RAD_DEFAULT;
+    fire_spread_rad = 0; /* 显式设0，不依赖工程里正在调的散布角；散布角单独有用例 */
     fire_min_rad = FIRE_MIN_RAD_DEFAULT;
     fire_max_rad = FIRE_MAX_RAD_DEFAULT;
     fire_hold_ms = FIRE_HOLD_MS_DEFAULT;
@@ -600,6 +616,155 @@ static void fire_gate_tests(void)
     setup_fire();
     fire_max_rad = NAN;
     assert(!fire_after_frame(1, 0, 300));
+}
+
+/* Yaw 前馈用例：Yaw 目标=实际，位置环输出为0，只看前馈本身。 */
+static void yaw_ff_tests(void)
+{
+    /* 增益为0时，即使有目标运动，输出与原来完全一样。 */
+    setup_default();
+    yaw_target_speed = 1.0f;
+    yaw_target_accel = 5.0f;
+    unitPID_calc();
+    assert(YawCtrl.Volt_out == 0);
+    near_value(yaw_ff_debug.out_ff, 0);
+
+    /* 速度前馈：1 rad/s 的目标速度加到速度环目标上（内部 0.001 rad/ms）。 */
+    setup_default();
+    yaw_ff_speed_gain = 1.0f;
+    yaw_target_speed = 1.0f;
+    unitPID_calc();
+    near_value(yaw_speed_setpoint * 1000, 1.0f);
+    near_value(yaw_ff_debug.speed_ff_rad_s, 1.0f);
+    assert(YawCtrl.Volt_out == (int16_t)(YAW_SPD_KP * 0.001f));
+    /* 增益0.5只加一半。 */
+    yaw_ff_speed_gain = 0.5f;
+    unitPID_calc();
+    near_value(yaw_speed_setpoint * 1000, 0.5f);
+
+    /* 增益填错（非数、负数、大于2）按关闭处理。 */
+    const float bad_gains[] = {NAN, -1.0f, YAW_FF_GAIN_MAX + 0.1f};
+    for (int i = 0; i < 3; ++i) {
+        setup_default();
+        yaw_target_speed = 1.0f;
+        yaw_target_accel = 5.0f;
+        yaw_ff_speed_gain = bad_gains[i];
+        yaw_ff_out_gain = bad_gains[i];
+        unitPID_calc();
+        near_value(yaw_speed_setpoint, 0);
+        assert(YawCtrl.Volt_out == 0);
+    }
+
+    /* 输出前馈：200×2 + 1100×0.5 + 900 = 1850。 */
+    setup_default();
+    yaw_ff_out_gain = 1.0f;
+    yaw_target_speed = 0.5f;
+    yaw_target_accel = 2.0f;
+    unitPID_calc();
+    near_value(yaw_ff_debug.out_ff, 1850);
+    assert(YawCtrl.Volt_out == 1850);
+    /* 反方向摩擦项取负。 */
+    yaw_target_speed = -0.5f;
+    yaw_target_accel = -2.0f;
+    unitPID_calc();
+    near_value(yaw_ff_debug.out_ff, -1850);
+    /* 目标比 5°/s 慢：不加摩擦项。 */
+    yaw_target_speed = 0.05f;
+    yaw_target_accel = 0;
+    unitPID_calc();
+    near_value(yaw_ff_debug.out_ff, 1100 * 0.05f);
+    /* 输出前馈自身限幅。 */
+    yaw_target_speed = 0;
+    yaw_target_accel = 1000.0f;
+    unitPID_calc();
+    near_value(yaw_ff_debug.out_ff, YAW_FF_OUT_MAX);
+    /* 模型参数填错：整个输出前馈关闭。 */
+    yaw_target_speed = 0.5f;
+    yaw_target_accel = 2.0f;
+    yaw_ff_friction = NAN;
+    unitPID_calc();
+    near_value(yaw_ff_debug.out_ff, 0);
+    yaw_ff_friction = YAW_FF_FRICTION_DEFAULT;
+    yaw_ff_inertia = INFINITY;
+    unitPID_calc();
+    near_value(yaw_ff_debug.out_ff, 0);
+
+    /* 无力时前馈也不能让电机出力。 */
+    setup_default();
+    yaw_ff_out_gain = 1.0f;
+    yaw_target_speed = 0.5f;
+    YawCtrl.nopowerflag = 1;
+    unitPID_calc();
+    assert(YawCtrl.Volt_out == 0);
+
+    /* 相邻帧估算目标角速度：第一帧速度为0，第二帧 42 ms 后 +0.01 rad。 */
+    setup_default();
+    YawCtrl.nowTime = 1000;
+    recordYawFrame(0.1f);
+    near_value(yaw_frame_speed, 0);
+    YawCtrl.nowTime = 1042;
+    recordYawFrame(0.11f);
+    near_value(yaw_frame_speed, 0.01f / 0.042f);
+    assert(yaw_frame_dt == 42);
+    /* 间隔小于 10 ms 的帧不拿来估速度，保留上一帧。 */
+    YawCtrl.nowTime = 1046;
+    recordYawFrame(0.5f);
+    near_value(yaw_frame_speed, 0.01f / 0.042f);
+    near_value(yaw_frame_angle, 0.11f);
+    /* 间隔超过 100 ms：速度按0重新开始。 */
+    YawCtrl.nowTime = 1200;
+    recordYawFrame(0.2f);
+    near_value(yaw_frame_speed, 0);
+    /* 跨 ±180°：按最短角度算。 */
+    YawCtrl.nowTime = 1300;
+    recordYawFrame(PI - 0.005f);
+    YawCtrl.nowTime = 1340;
+    recordYawFrame(-PI + 0.005f);
+    near_value(yaw_frame_speed, 0.01f / 0.04f);
+    /* 速度大得不合理：按0。 */
+    YawCtrl.nowTime = 1380;
+    recordYawFrame(-PI + 0.005f + 0.5f);
+    near_value(yaw_frame_speed, 0);
+    /* 无效角度不记录。 */
+    YawCtrl.nowTime = 1420;
+    recordYawFrame(NAN);
+    near_value(yaw_frame_angle, -PI + 0.005f + 0.5f);
+
+    /* 每周期给出视觉目标运动；插值关闭时目标不动。 */
+    setup_default();
+    YawCtrl.nowTime = 2000;
+    recordYawFrame(0.1f);
+    YawCtrl.nowTime = 2040;
+    recordYawFrame(0.12f);                 /* 速度 0.5 rad/s */
+    YawCtrl.want_AbsoluteAngleCtrl = 0.12f;
+    YawCtrl.nowTime = 2060;
+    updateYawVisionMotion(1);
+    assert(yaw_target_source == YAW_TARGET_SOURCE_VISION);
+    near_value(yaw_target_speed, 0.5f);
+    near_value(yaw_target_accel, 0);
+    near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.12f);
+    /* 插值打开：20 ms 后目标往前推 0.5 × 0.02 = 0.01 rad。 */
+    yaw_ff_interp = 1;
+    updateYawVisionMotion(1);
+    near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.13f);
+    /* 最多往前推 50 ms。 */
+    YawCtrl.nowTime = 2120;
+    updateYawVisionMotion(1);
+    near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.12f + 0.5f * 0.05f);
+    /* 帧超过 100 ms 没更新：不给目标运动，也不再推。 */
+    yaw_target_source = YAW_TARGET_SOURCE_NONE;
+    yaw_target_speed = 0;
+    YawCtrl.want_AbsoluteAngleCtrl = 0.12f;
+    YawCtrl.nowTime = 2141;
+    updateYawVisionMotion(1);
+    assert(yaw_target_source == YAW_TARGET_SOURCE_NONE);
+    near_value(yaw_target_speed, 0);
+    near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.12f);
+    /* 不在自瞄：不给目标运动。 */
+    YawCtrl.nowTime = 2060;
+    updateYawVisionMotion(0);
+    assert(yaw_target_source == YAW_TARGET_SOURCE_NONE);
+    yaw_ff_interp = 0;
 }
 
 int main(void)
@@ -873,9 +1038,10 @@ int main(void)
 
     friction_tests();
     yaw_friction_tests();
+    yaw_ff_tests();
     fire_gate_tests();
 
-    puts("PASS: fire gate; Yaw static friction; static friction fill-to-threshold; compensation-off matches baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
+    puts("PASS: fire gate; Yaw feedforward; Yaw static friction; static friction fill-to-threshold; compensation-off matches baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
 }
 '''
 (out / 'test.c').write_text(prefix + declarations + functions + tests, encoding='utf-8')

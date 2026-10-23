@@ -142,6 +142,37 @@ Pitch 观察：`pitch_control_debug.friction_out` 是本周期补的差额，`fr
 `friction_active` 表示本周期补偿生效。串口 CSV 里这两个标志也有，差额可用
 `total_unclamped_out - pid_unclamped_out - gravity_out` 算出。确认合适后写回 `PITCH_FRICTION_*_DEFAULT`。
 
+## Yaw 目标前馈（默认关闭）
+
+两个环都只有 P，必须先有误差才会出力，目标一动就会落后。前馈直接把"跟着目标动需要的速度和输出"给出去，反馈环只修剩下的偏差：
+
+- **速度前馈**：速度环目标 = 位置环输出 + `yaw_ff_speed_gain` × 目标角速度。
+- **输出前馈**：电机输出 += `yaw_ff_out_gain` × (`yaw_ff_inertia` × 目标角加速度 + `yaw_ff_back_emf` × 目标角速度 + `yaw_ff_friction` × 运动方向)，自身限幅 10000。
+  目标慢于 5°/s 时不加摩擦项，避免视觉抖动让方向来回翻。
+
+目标角速度、角加速度的来源（`yaw_ff_debug.source`）：
+
+| 来源 | 速度 | 加速度 |
+| --- | --- | --- |
+| C 板波形测试（2） | 按正弦公式精确计算 | 按公式精确计算 |
+| 视觉帧，CAN 或串口模拟（1） | 相邻两帧角度差 ÷ 间隔；间隔小于 10 ms 跳过，大于 100 ms 或帧过期按 0 | 0 |
+| 手动、无力、不在自瞄（0） | 0 | 0 |
+
+`yaw_ff_interp = 1` 时，两帧之间的目标按估算速度往前推（最多 50 ms），可把 24 Hz 的台阶变平滑。
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `yaw_ff_speed_gain` | 0 | 速度前馈增益，0～2，建议 0.5 → 1.0 |
+| `yaw_ff_out_gain` | 0 | 输出前馈增益，0～2 |
+| `yaw_ff_inertia` | 200 | 每 1 rad/s² 的输出（回归约 3.5 / (°/s²)） |
+| `yaw_ff_back_emf` | 1100 | 每 1 rad/s 的输出（回归约 20 / (°/s)） |
+| `yaw_ff_friction` | 900 | 运动中的动摩擦 |
+| `yaw_ff_interp` | 0 | 1 = 帧间插值 |
+
+建议顺序：先用 C 板波形（精确速度）只开速度前馈，看幅度和滞后；再加输出前馈；最后用 24 Hz 串口模拟或真实视觉，
+打开插值看估算速度的效果。VOFA 的"Yaw 目标速度"通道现在显示速度环的完整目标（位置环输出 + 速度前馈）。
+观察 `yaw_ff_debug` 的 `target_speed_rad_s`、`speed_ff_rad_s`、`out_ff`、`frame_dt_ms`。
+
 ## 自瞄开火门控
 
 自瞄两次拨弹启动至少间隔 **200 ms**（最高5次/秒），参数在 `Task/shoot_task.c` 的 `AUTO_FIRE_MIN_INTERVAL_TICKS`。首发满足条件后立即启动；后续只有间隔已到、当前门控仍允许且摩擦轮开启时才启动，冷却期间不排队。间隔从实际启动时刻计算，开关摩擦轮或退出再进入自瞄不清除间隔；手动模式保持原逻辑，单次拨弹时长仍设为41 ms。实际出弹颗数需实机验证。宿主检查：`python -X utf8 tests/host/test_auto_fire_interval.py`。
