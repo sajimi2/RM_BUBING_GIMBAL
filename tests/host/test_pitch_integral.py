@@ -76,6 +76,7 @@ static void setup_default(void)
 {
     memset(&PitchCtrl, 0, sizeof(PitchCtrl));
     memset(&YawCtrl, 0, sizeof(YawCtrl));
+    memset(&yaw_wave, 0, sizeof(yaw_wave));
     memset((void *)&pitch_control_debug, 0, sizeof(pitch_control_debug));
     pitch_gravity_config.gain = 0;
     pitch_gravity_config.offset_rad = 0;

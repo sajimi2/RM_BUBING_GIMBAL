@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-/* 上行：8 个小端 float + JustFloat 帧尾。下行：VOFA Str 命令，以换行结束。 */
-#define TUNING_CHANNEL_COUNT 8U
+/* 上行：12 个小端 float + JustFloat 帧尾。下行：VOFA Str 命令，以换行结束。 */
+#define TUNING_CHANNEL_COUNT 12U
 #define TUNING_FRAME_SIZE (4U * TUNING_CHANNEL_COUNT + 4U)
 #define TUNING_LINE_SIZE 96U
 #define TUNING_NAME_SIZE 24U

@@ -102,6 +102,10 @@ int main(void)
     for (unsigned i = 0; i < 10; ++i) {
         tick += 20; tuning_uart_poll(); assert(huart6.gState == 1); complete();
     }
+    stream_period = 5;
+    for (unsigned i = 0; i < 20; ++i) {
+        tick += 5; tuning_uart_poll(); assert(huart6.gState == 1); complete();
+    }
     puts("PASS: UART JustFloat streaming/20ms scheduling/DMA buffer/TX retry/timeout suffix rejection/overflow/error recovery");
 }
 '''

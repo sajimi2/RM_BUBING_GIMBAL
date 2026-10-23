@@ -1,11 +1,11 @@
 .pragma library
 
-// 下发频率约24 Hz；frequency表示左右摆动次数/秒，两者相互独立。
+// 低频沿用约24 Hz串口目标；超过2 Hz由C板控制任务生成，不能靠QML Timer加速。
 function validate(amplitude, frequency, duration) {
     if (!isFinite(amplitude) || amplitude <= 0 || amplitude > 10)
         return "幅度请输入0～10°之间的数（不含0）";
-    if (!isFinite(frequency) || frequency < 0.1 || frequency > 2)
-        return "摆动频率请输入0.1～2 Hz";
+    if (!isFinite(frequency) || frequency < 0.1 || frequency > 30)
+        return "摆动频率请输入0.1～30 Hz";
     if (!isFinite(duration) || duration < 1 || duration > 60)
         return "时长请输入1～60秒";
     return "";

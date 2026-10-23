@@ -117,6 +117,7 @@ typedef struct
     pitch_gravity_config_t gravity;
     pitch_control_debug_t control;
     yaw_control_debug_t yaw;
+    fire_gate_debug_t fire_gate; // 本周期门控记录，和双轴控制结果一起读取
     fp32 speed_ki;
     uint8_t source;
     uint8_t remote_online;
@@ -142,6 +143,10 @@ uint8_t gimbal_tuning_set_gravity(fp32 gain, fp32 offset_rad);
 uint8_t gimbal_tuning_set_parameters(fp32 gain, fp32 offset_rad, fp32 speed_ki);
 uint8_t gimbal_tuning_set_source(uint8_t source);
 uint8_t gimbal_tuning_submit_vision(const uint8_t payload[8]);
+/* 高频测试由控制任务每2 ms生成目标；串口只负责开始、停止和保活。 */
+uint8_t gimbal_tuning_start_yaw_wave(fp32 amplitude_deg, fp32 frequency_hz, fp32 duration_s);
+uint8_t gimbal_tuning_keep_yaw_wave(void);
+void gimbal_tuning_stop_yaw_wave(void);
 
 void gimbal_task(void const *pvParameters);
 extern const struct GimbalMotorCtrl_s* get_wantedyaw_point(void);

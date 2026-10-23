@@ -45,6 +45,8 @@
 #define PITCH_I_SEPARATION_RAD_DEFAULT 0.1f
 
 #define YAW_SPD_KP 10000000.0f
+//数值大是因为角速度计算那里的dt是ms，PID内部沿用rad/ms，要乘1000
+//实际除回去就是10000，速度环控制的是电机电压值，范围为0~25000，所以合理
 #define YAW_SPD_KI 0	
 #define YAW_SPD_KD 0
 
@@ -53,7 +55,7 @@
 #define PITCH_AGL_KI 0
 #define PITCH_AGL_KD 0.01f
 
-#define YAW_AGL_KP 0.012f
+#define YAW_AGL_KP 0.018f
 #define YAW_AGL_KI 0.00f
 #define YAW_AGL_KD 0.00000f
 
@@ -78,8 +80,8 @@
 #define PITCH_FRICTION_UP_OUT_DEFAULT    750.0f    // 抬头方向的门槛，实车初值
 #define PITCH_FRICTION_DOWN_OUT_DEFAULT  750.0f    // 低头方向的门槛，实车初值
 #define PITCH_FRICTION_ERROR_RAD_DEFAULT 0.0087f   // 约0.5°，离目标比它近时不补足
-#define YAW_FRICTION_POS_OUT_DEFAULT     0.0f      // Yaw角度增大方向的门槛，默认关闭；建议从600开始试
-#define YAW_FRICTION_NEG_OUT_DEFAULT     0.0f      // Yaw角度减小方向的门槛，默认关闭；建议从600开始试
+#define YAW_FRICTION_POS_OUT_DEFAULT     1000.0f      // Yaw角度增大方向的门槛，默认关闭；建议从600开始试
+#define YAW_FRICTION_NEG_OUT_DEFAULT     1000.0f      // Yaw角度减小方向的门槛，默认关闭；建议从600开始试
 #define YAW_FRICTION_ERROR_RAD_DEFAULT   0.0087f   // 约0.5°，离目标比它近时不补足
 
 // 开火门控：视觉允许开火、视觉帧没过期、云台已对准且保持一小段时间，才允许拨弹
@@ -87,9 +89,9 @@
  * 半宽 = 装甲板实测半宽 × 0.7余量；视觉预测误差和散布也会让弹丸偏，所以不用满。 */
 #define FIRE_YAW_HALF_M_DEFAULT    0.047f  // 横宽13.5cm的一半6.75cm × 0.7
 #define FIRE_PITCH_HALF_M_DEFAULT  0.043f  // 竖向投影约12.3cm的一半6.15cm × 0.7
-#define FIRE_SPREAD_RAD_DEFAULT    0.0f    // 发射散布角，实测前先为0
+#define FIRE_SPREAD_RAD_DEFAULT    0.006f    // 发射散布角，实测前先为0
 #define FIRE_MIN_RAD_DEFAULT       0.0052f // 约0.3°，算出来比它还小说明太远打不准，不开火
-#define FIRE_MAX_RAD_DEFAULT       0.0524f // 约3°，近处允许误差封顶
+#define FIRE_MAX_RAD_DEFAULT       0.0224f // 约1.28°，算出来比它还大说明太近打不准，不开火
 #define FIRE_HOLD_MS_DEFAULT       10U     // 误差连续在范围内满这么久才开火，必须小于视觉帧间隔约42ms
 #define FIRE_FRAME_TIMEOUT_MS      100U    // 视觉帧超过这么久没更新，视为视觉掉线，不开火
 #define FIRE_DISTANCE_MIN_CM       30U     // 距离小于30cm视为无效（包括0，即视觉没给距离）
@@ -252,6 +254,19 @@ static fp32 yawSpdPIDco[3] = {YAW_SPD_KP, YAW_SPD_KI, YAW_SPD_KD};
 static fp32 pitchAglPIDco[3] = {PITCH_AGL_KP, PITCH_AGL_KI, PITCH_AGL_KD};
 static fp32 yawAglPIDco[3] = {YAW_AGL_KP, YAW_AGL_KI, YAW_AGL_KD};
 
+// 高频测试独立保存状态，不修改PID参数，不经过CAN开火请求。
+typedef struct
+{
+    uint8_t active;
+    fp32 center_rad;
+    fp32 amplitude_rad;
+    fp32 frequency_hz;
+    uint32_t duration_ms;
+    uint32_t start_ms;
+    uint32_t keepalive_ms;
+} yaw_wave_state_t;
+static yaw_wave_state_t yaw_wave;
+
 // 模式相关
 static const enum RobotState_e *robotMode;
 static enum RobotState_e lastMode;
@@ -272,6 +287,8 @@ void getControlAngles(void);
 void unitPID_calc(void);
 static void recordFireFrame(const CAN_Send_to_MCU *frame, uint8_t source);
 static void updateFireGate(void);
+static uint8_t gimbal_tuning_is_enabled(void);
+static void updateYawWave(void);
 
 fp32 delta_pitch, delta_yaw;
 /**
@@ -532,7 +549,10 @@ void getControlAngles(void)
     const uint8_t automatic = robotIsAuto() || rc_p->rc.s[1] == 2;
     /* 退出自瞄或遥控掉线后撤掉串口来源，不能在重新使能时消费旧测试目标。 */
     if (!automatic || !rc_online || *robotMode == RobotState_e_Powerless)
+    {
         NX_SelectSource(NX_SOURCE_CAN);
+        yaw_wave.active = 0;
+    }
     // 获取遥控器输入（带死区处理）
     int16_t yaw_channel = 0, pitch_channel = 0;
     rc_deadband_limit(rc_p->rc.ch[0], yaw_channel, RC_DEADLINE);   // 右摇杆X轴
@@ -600,6 +620,8 @@ void getControlAngles(void)
             // CAN和串口模拟共用同一绝对角度载荷，不累加旧目标。
             YawCtrl.want_AbsoluteAngleCtrl = YawCtrl.nowAbsoluteAngle + delta_yaw;
         }
+        // 高频模式在控制周期内更新，避免24 Hz目标下发造成混叠。
+        updateYawWave();
     } 
 	else
 	{
@@ -642,6 +664,7 @@ void gimbal_tuning_get_state(pitch_tuning_state_t *state)
     state->tick_ms = xTaskGetTickCount();
     state->gravity = pitch_gravity_config;
     state->control = pitch_control_debug;
+    state->fire_gate = fire_gate_debug;
     state->speed_ki = PitchCtrl.spd_pid.Ki;
     state->source = NX_GetSource();
     state->remote_online = rc_online;
@@ -711,6 +734,8 @@ uint8_t gimbal_tuning_set_source(uint8_t source)
         return TUNING_BAD_PARAMETER;
     if (source == NX_SOURCE_UART && !gimbal_tuning_is_enabled())
         return TUNING_NOT_ENABLED;
+    // 手动切换来源会结束原测试，重新开始必须明确发开始命令。
+    gimbal_tuning_stop_yaw_wave();
     NX_SelectSource(source);
     return TUNING_OK;
 }
@@ -719,6 +744,8 @@ uint8_t gimbal_tuning_submit_vision(const uint8_t payload[8])
 {
     int16_t pitch_raw;
     fp32 pitch_rad;
+    uint8_t accepted;
+    uint32_t key;
     if (!gimbal_tuning_is_enabled())
         return TUNING_NOT_ENABLED;
     if (NX_GetSource() != NX_SOURCE_UART)
@@ -730,7 +757,108 @@ uint8_t gimbal_tuning_submit_vision(const uint8_t payload[8])
     pitch_rad = -(fp32)pitch_raw * 3.1415926f / 32767;
     if (pitch_rad < PITCH_MIN_ANGLE || pitch_rad > PITCH_MAX_ANGLE)
         return TUNING_OUT_OF_RANGE;
-    return NX_ReceiveFrame(payload, NX_SOURCE_UART) ? TUNING_OK : TUNING_WRONG_SOURCE;
+    key = __get_PRIMASK();
+    __disable_irq();
+    accepted = NX_ReceiveFrame(payload, NX_SOURCE_UART);
+    // 手动目标应覆盖波形测试，不能下一周期又被旧波形改回去。
+    if (accepted)
+        yaw_wave.active = 0;
+    __set_PRIMASK(key);
+    if (!accepted)
+        return TUNING_WRONG_SOURCE;
+    return TUNING_OK;
+}
+
+uint8_t gimbal_tuning_start_yaw_wave(fp32 amplitude_deg, fp32 frequency_hz, fp32 duration_s)
+{
+    uint32_t key;
+    uint32_t now;
+    if (!isfinite(amplitude_deg) || amplitude_deg <= 0.0f || amplitude_deg > 10.0f)
+        return TUNING_OUT_OF_RANGE;
+    if (!isfinite(frequency_hz) || frequency_hz < 0.1f || frequency_hz > 30.0f)
+        return TUNING_OUT_OF_RANGE;
+    if (!isfinite(duration_s) || duration_s < 1.0f || duration_s > 60.0f)
+        return TUNING_OUT_OF_RANGE;
+    key = __get_PRIMASK();
+    __disable_irq();
+    if (!gimbal_tuning_is_enabled())
+    {
+        __set_PRIMASK(key);
+        return TUNING_NOT_ENABLED;
+    }
+    if (NX_GetSource() != NX_SOURCE_UART)
+    {
+        __set_PRIMASK(key);
+        return TUNING_WRONG_SOURCE;
+    }
+    if (!isfinite(YawCtrl.nowAbsoluteAngle))
+    {
+        __set_PRIMASK(key);
+        return TUNING_OUT_OF_RANGE;
+    }
+    now = HAL_GetTick();
+    yaw_wave.center_rad = YawCtrl.nowAbsoluteAngle;
+    yaw_wave.amplitude_rad = amplitude_deg * PI / 180.0f;
+    yaw_wave.frequency_hz = frequency_hz;
+    yaw_wave.duration_ms = (uint32_t)(duration_s * 1000.0f);
+    yaw_wave.start_ms = now;
+    yaw_wave.keepalive_ms = now;
+    yaw_wave.active = 1;
+    __set_PRIMASK(key);
+    return TUNING_OK;
+}
+
+uint8_t gimbal_tuning_keep_yaw_wave(void)
+{
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    if (!yaw_wave.active)
+    {
+        __set_PRIMASK(key);
+        return TUNING_NOT_ENABLED;
+    }
+    yaw_wave.keepalive_ms = HAL_GetTick();
+    __set_PRIMASK(key);
+    return TUNING_OK;
+}
+
+void gimbal_tuning_stop_yaw_wave(void)
+{
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    yaw_wave.active = 0;
+    __set_PRIMASK(key);
+}
+
+static void updateYawWave(void)
+{
+    uint32_t now;
+    uint32_t elapsed;
+    fp32 phase;
+    fp32 angle;
+    if (!yaw_wave.active)
+        return;
+    // 遥控退出、掉线或恢复CAN时立即停止，不能自动重新接管。
+    if (!gimbal_tuning_is_enabled() || NX_GetSource() != NX_SOURCE_UART)
+    {
+        yaw_wave.active = 0;
+        return;
+    }
+    now = HAL_GetTick();
+    elapsed = now - yaw_wave.start_ms;
+    // 电脑断连后即使控制任务仍在运行，也最多等500 ms就停在最后目标。
+    if (now - yaw_wave.keepalive_ms >= 500U || elapsed >= yaw_wave.duration_ms)
+    {
+        yaw_wave.active = 0;
+        return;
+    }
+    phase = 2.0f * PI * yaw_wave.frequency_hz * ((fp32)elapsed * 0.001f);
+    angle = yaw_wave.center_rad + yaw_wave.amplitude_rad * sinf(phase);
+    if (angle > PI)
+        angle -= 2.0f * PI;
+    if (angle < -PI)
+        angle += 2.0f * PI;
+    YawCtrl.want_AbsoluteAngleCtrl = angle;
 }
 
 /**

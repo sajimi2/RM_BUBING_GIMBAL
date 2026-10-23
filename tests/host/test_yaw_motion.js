@@ -9,7 +9,8 @@ const motion = {};
 vm.createContext(motion);
 vm.runInContext(code, motion);
 assert.equal(motion.validate(3, 0.5, 10), '');
-for (const parameters of [[0, 0.5, 10], [11, 0.5, 10], [3, 24, 10], [3, 0.5, Infinity]]) {
+assert.equal(motion.validate(3, 30, 10), '');
+for (const parameters of [[0, 0.5, 10], [11, 0.5, 10], [3, 30.1, 10], [3, 0.5, Infinity]]) {
     assert.notEqual(motion.validate(...parameters), '');
 }
 assert.equal(motion.target(20, 3, 0.5, 0), 20);
@@ -82,3 +83,18 @@ widget.tick();
 assert.equal(widget.sweeping, false);
 assert.equal(sent.length, 4);
 console.log('PASS: actual widget start/stop/timer/disconnect/telemetry timeout/duration/no automatic return');
+// 高频模式只发配置和保活，不能继续以24 Hz发送假30 Hz目标。
+sent.length = 0;
+widget.frequencyInput.text = '30';
+widget.lastDataAt = now;
+widget.start();
+assert.equal(widget.highRate, true);
+assert.deepEqual(sent, ['source:1\n', 'stream:5\n', 'yaw_wave:3.0000,30.0000,10.000\n']);
+now += 100;
+widget.lastDataAt = now;
+widget.tick();
+assert.equal(sent[3], 'yaw_ping:0\n');
+widget.stop('manual high rate stop');
+assert.deepEqual(sent.slice(-2), ['yaw_stop:0\n', 'stream:20\n']);
+assert.equal(widget.sweeping, false);
+console.log('PASS: 30 Hz mode/configuration/5ms telemetry/heartbeat/stop/20ms restore');

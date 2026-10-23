@@ -20,7 +20,10 @@ enum command_id
     CMD_STREAM,
     CMD_GRAVITY,
     CMD_MARK,
-    CMD_YAW
+    CMD_YAW,
+    CMD_YAW_WAVE,
+    CMD_YAW_PING,
+    CMD_YAW_STOP
 };
 
 typedef struct
@@ -42,7 +45,10 @@ static const tuning_command_t commands[] = {
     {"stream", CMD_STREAM, 1},
     {"gravity", CMD_GRAVITY, 1},
     {"mark", CMD_MARK, 1},
-    {"yaw", CMD_YAW, 1}
+    {"yaw", CMD_YAW, 1},
+    {"yaw_wave", CMD_YAW_WAVE, 3},
+    {"yaw_ping", CMD_YAW_PING, 1},
+    {"yaw_stop", CMD_YAW_STOP, 1}
 };
 
 static uint16_t stream_period_ms = 20U;
@@ -171,11 +177,22 @@ static uint8_t execute_command(uint8_t id, const float *values)
             return TUNING_OUT_OF_RANGE;
         // 单独修改Yaw时保持Pitch目标，避免把它重置到零。
         return submit_angles(state.control.target_angle_rad, value * DEG_TO_RAD);
+    case CMD_YAW_WAVE:
+        return gimbal_tuning_start_yaw_wave(value, values[1], values[2]);
+    case CMD_YAW_PING:
+        if (value != 0.0f)
+            return TUNING_BAD_PARAMETER;
+        return gimbal_tuning_keep_yaw_wave();
+    case CMD_YAW_STOP:
+        if (value != 0.0f)
+            return TUNING_BAD_PARAMETER;
+        gimbal_tuning_stop_yaw_wave();
+        return TUNING_OK;
     case CMD_STREAM:
-        // 八通道共36字节，115200、8N1下20 ms周期约占16%带宽。
+        // 十二通道共52字节，5 ms约占90%带宽；30 Hz测试不能仍用50 Hz观察。
         if (value != truncf(value))
             return TUNING_BAD_PARAMETER;
-        if (value != 0.0f && (value < 20.0f || value > 2000.0f))
+        if (value != 0.0f && (value < 5.0f || value > 2000.0f))
             return TUNING_OUT_OF_RANGE;
         stream_period_ms = (uint16_t)value;
         return TUNING_OK;
@@ -250,6 +267,11 @@ uint16_t tuning_service_frame(uint8_t output[TUNING_FRAME_SIZE])
     channels[5] = (float)state.vision_online;
     channels[6] = yaw->target_speed_rad_s * RAD_TO_DEG;
     channels[7] = yaw->speed_rad_s * RAD_TO_DEG;
+    // 直接上传本周期门控记录，单位rad；前置条件提前返回时对应字段为0。
+    channels[8] = state.fire_gate.yaw_error_rad;
+    channels[9] = state.fire_gate.yaw_threshold_rad;
+    channels[10] = state.fire_gate.pitch_error_rad;
+    channels[11] = state.fire_gate.pitch_threshold_rad;
 
     // Inf会被误认作帧尾；仅过滤上传值，不改变控制数据。
     for (i = 0; i < TUNING_CHANNEL_COUNT; ++i)

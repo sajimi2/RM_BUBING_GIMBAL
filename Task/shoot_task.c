@@ -28,7 +28,10 @@
 #define SHOOT_CTRL_TIME 5
 
 static TickType_t shootOneStartTime = 0;
-#define SHOOT_ONE_DURATION_TICKS pdMS_TO_TICKS(41)  // 200毫秒转换为ticks
+#define SHOOT_ONE_DURATION_TICKS pdMS_TO_TICKS(41)  // 单次拨弹持续41 ms
+#define AUTO_FIRE_MIN_INTERVAL_TICKS pdMS_TO_TICKS(250) // 自瞄两次拨弹启动至少间隔200 ms
+static TickType_t autoFireLastStartTime;
+static uint8_t autoFireHasStarted;
 
 #define TRIGGER_ROUNDS_FOR_A_BULLET_A 7
 #define TRIGGER_ROUNDS_FOR_A_BULLET_B 8
@@ -99,6 +102,7 @@ static void fricModeChange(void);
 void setSpeed(void);
 static void calcCurrent(void);
 static void getShootMotorSpeed(void);
+static void tryStartAutoShot(TickType_t now);
 
 void shoot_task(void const *pvParameters)
 {
@@ -148,15 +152,8 @@ static void getInstruction(void)
 	//左拨杆 上：开摩擦轮 中：关 下：nx接管，并且改变总状态机以改变robotauto
 	if(robotIsAuto())//自动模式
 	{
-		if(fire_t == 1)
-		{
-			fire_t = 0;//凌晨写的逻辑，我觉得有问题
-			// 视觉允许开火后，还要云台这边确认已经对准，才打这一发
-			if (gimbal_fire_allowed() == 1)
-			{
-				triggerMode = TriggerMode_e_ShootOne;
-			}
-		}
+        // 自瞄统一由拨弹状态机读取门控并限频，收帧路径不再直接启动单发。
+        fire_t = 0;
 	}
 }
 
@@ -201,6 +198,25 @@ static void fricModeChange(void)
 	}
 }
 
+/* 自瞄单发的唯一入口：从实际启动时刻计间隔，首发无需等待。
+ * 冷却期间不排队；开轮、模式切换和重复视觉帧都不重置上次启动时间。
+ */
+static void tryStartAutoShot(TickType_t now)
+{
+    if (triggerMode != TriggerMode_e_Stop || !fricOn || !robotIsAuto())
+        return;
+    if (gimbal_fire_allowed() != 1)
+        return;
+    if (autoFireHasStarted &&
+        (TickType_t)(now - autoFireLastStartTime) < AUTO_FIRE_MIN_INTERVAL_TICKS)
+        return;
+
+    triggerMode = TriggerMode_e_ShootOne;
+    shootOneStartTime = now;
+    autoFireLastStartTime = now;
+    autoFireHasStarted = 1;
+}
+
 //拨弹轮状态机
 void static triggerModeChange(void)
 {
@@ -214,12 +230,16 @@ void static triggerModeChange(void)
     }
 	
     currentTick = xTaskGetTickCount();
+
+    // 手动连发切入自瞄时也必须经过自瞄的间隔检查。
+    if (robotIsAuto() && triggerMode == TriggerMode_e_ShootMulti)
+        triggerMode = TriggerMode_e_Stop;
 	
     if(lastmode != triggerMode)
     {
         lastmode = triggerMode;
-		// 进入单发模式时记录开始时间
-        if(triggerMode == TriggerMode_e_ShootOne)
+		// 手动单发沿用原计时；自瞄已在统一入口记录实际启动时间。
+        if(triggerMode == TriggerMode_e_ShootOne && !robotIsAuto())
         {
             shootOneStartTime = currentTick;
         }
@@ -229,17 +249,13 @@ void static triggerModeChange(void)
     {
         case TriggerMode_e_Stop:
             // 鼠标控制发射
-            if (rc_p->mouse.press_l == 1)
+            if (rc_p->mouse.press_l == 1 && !robotIsAuto())
             {
                 triggerMode = TriggerMode_e_ShootMulti;
             }
             if((robotIsAuto() == 1))
             {
-                // 开火门控里已经检查了：视觉fire位、视觉帧是否过期、距离和两轴误差
-                if (gimbal_fire_allowed() == 1)
-                {
-                    triggerMode = TriggerMode_e_ShootOne;
-                }
+                tryStartAutoShot(currentTick);
             }
             else //手动模式手柄
             {
@@ -303,6 +319,8 @@ static void initShootModes(void)
     fricOn=0;
     triggerOn=0;
 	triggerMode=TriggerMode_e_Stop;
+    autoFireLastStartTime = 0;
+    autoFireHasStarted = 0;
 }
 
 //速度设置

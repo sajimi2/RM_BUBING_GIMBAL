@@ -1,10 +1,10 @@
 # BubinGimbalV1.0
 
-当前调参工具为 **VOFA+ 直接连接 DAP 串口**，无需网页后台。JustFloat只上传8个通道：Pitch实际/目标角、Yaw实际/目标角、Yaw最终PID输出、视觉CAN接收在线标志，以及Yaw目标/实际速度（°/s）；默认20 ms上传，VOFA的Δt设为20 ms。原有Gain、Offset、Ki和Pitch目标下行命令保留。配置方法见 [VOFA_TUNING.md](VOFA_TUNING.md)。原网页及其二进制协议资料保留供历史查阅，不再连接当前固件。
+当前调参工具为 **VOFA+ 直接连接 DAP 串口**，无需网页后台。JustFloat上传12个通道：原I0～I7保留Pitch实际/目标角、Yaw实际/目标角、Yaw最终PID输出、视觉CAN接收在线标志，以及Yaw目标/实际速度（°/s）；I8～I11追加Yaw误差、Yaw阈值、Pitch误差、Pitch阈值（均为rad）。默认20 ms上传，VOFA的Δt设为20 ms。原有Gain、Offset、Ki和Pitch目标下行命令保留。配置方法及门控提前返回时的零值说明见 [VOFA_TUNING.md](VOFA_TUNING.md)。原网页及其二进制协议资料保留供历史查阅，不再连接当前固件。
 
 VOFA串口收发由独立的`Task/vofa_task.c`任务处理，CubeMX的ioc中登记为`vofaTask`。云台、IMU、发射等原有任务手动创建于`Src/freertos.c`的用户代码区，因此不在CubeMX任务表中显示。具体说明见[任务说明](VOFA_TUNING.md#在cubemx里看任务)。
 
-新增[Yaw自动摆动控件与CSV截取窗口](tools/vofa/VOFA_YAW_SWEEP.md)：按钮启动约24 Hz的Yaw目标发送，默认±3°、0.5 Hz、10秒；CSV可拖选区间另存，原文件保留。上行仍为8个通道。
+新增[Yaw自动摆动控件与CSV截取窗口](tools/vofa/VOFA_YAW_SWEEP.md)：大字体控件支持0.1～30 Hz，默认±3°、0.5 Hz、10秒；不超过2 Hz保留24 Hz视觉模拟，超过2 Hz由板端2 ms控制周期生成目标，自动请求5 ms遥测。CSV可拖选区间另存，当前上行为12个通道。
 
 当前阶段为双环 PID + 重力补偿，默认 Ki=6000、Gain=2500、Offset=1.16 rad。串口上车对照记录、检查范围和后续真实视觉测试顺序见 [2026-10-21 阶段存档](docs/checkpoints/2026-10-21-pitch-pid-gravity.md)。Pitch 静摩擦补偿（启动补足）的代码已加入，默认关闭，见下文“Pitch 静摩擦补偿”。
 
@@ -143,6 +143,8 @@ Pitch 观察：`pitch_control_debug.friction_out` 是本周期补的差额，`fr
 `total_unclamped_out - pid_unclamped_out - gravity_out` 算出。确认合适后写回 `PITCH_FRICTION_*_DEFAULT`。
 
 ## 自瞄开火门控
+
+自瞄两次拨弹启动至少间隔 **200 ms**（最高5次/秒），参数在 `Task/shoot_task.c` 的 `AUTO_FIRE_MIN_INTERVAL_TICKS`。首发满足条件后立即启动；后续只有间隔已到、当前门控仍允许且摩擦轮开启时才启动，冷却期间不排队。间隔从实际启动时刻计算，开关摩擦轮或退出再进入自瞄不清除间隔；手动模式保持原逻辑，单次拨弹时长仍设为41 ms。实际出弹颗数需实机验证。宿主检查：`python -X utf8 tests/host/test_auto_fire_interval.py`。
 
 视觉的 `fire=1` 只表示"允许开火"。电控每个控制周期（2 ms）检查下面几条，**全部满足并连续保持
 `fire_hold_ms`（默认 10 ms）**才拨弹，任何一条不满足就重新计时：

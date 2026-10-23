@@ -34,10 +34,20 @@ static uint8_t parse_line(char *line, tuning_message_t *message)
     while (is_space(*cursor))
         ++cursor;
     start = cursor;
-    while (*cursor >= 'a' && *cursor <= 'z')
+    while (*cursor != '\0')
+    {
+        // 多词命令用下划线分隔，仍不接受空格或其他符号混入名称。
+        if (*cursor == '_')
+        {
+            ++cursor;
+            continue;
+        }
+        if (*cursor < 'a' || *cursor > 'z')
+            break;
         ++cursor;
+    }
     length = (uint16_t)(cursor - start);
-    // 名称仅用小写字母；未知名称交由服务层报告。
+    // 名称仅用小写字母和下划线；未知名称交由服务层报告。
     if (length == 0U || length >= TUNING_NAME_SIZE)
         return 1;
     memcpy(message->name, start, length);

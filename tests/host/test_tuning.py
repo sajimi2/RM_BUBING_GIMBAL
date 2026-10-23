@@ -71,9 +71,10 @@ uint8_t fire_t;
     funcs = '\n'.join(function(nx, name) for name in (
         'NX_GetSource', 'NX_VisionOnline', 'NX_SelectSource', 'NX_ReceiveFrame', 'NX_TakeControlFrame'))
     funcs += '\n' + '\n'.join(function(source, name) for name in (
-        'recordFireFrame', 'getControlAngles', 'gimbal_tuning_is_enabled', 'gimbal_tuning_get_state',
+        'gimbal_tuning_is_enabled', 'updateYawWave', 'recordFireFrame', 'getControlAngles', 'gimbal_tuning_get_state',
         'gimbal_tuning_get_limits', 'gimbal_tuning_set_gravity', 'gimbal_tuning_set_parameters',
-        'gimbal_tuning_set_source', 'gimbal_tuning_submit_vision'))
+        'gimbal_tuning_stop_yaw_wave', 'gimbal_tuning_set_source', 'gimbal_tuning_submit_vision',
+        'gimbal_tuning_start_yaw_wave', 'gimbal_tuning_keep_yaw_wave'))
     tests = r'''
 static tuning_parser_t parser;
 static float channels[TUNING_CHANNEL_COUNT];
@@ -116,7 +117,7 @@ int main(int argc, char **argv)
     memset(&PitchCtrl, 0, sizeof(PitchCtrl));
     memset(&YawCtrl, 0, sizeof(YawCtrl));
     snapshot();
-    assert(TUNING_CHANNEL_COUNT == 8 && TUNING_FRAME_SIZE == 36);
+    assert(TUNING_CHANNEL_COUNT == 12 && TUNING_FRAME_SIZE == 52);
     assert(tuning_service_period_ms() == 20 && channels[5] == 0);
     command("parameters:2500,66,6000\n", TUNING_OK);
     assert(pitch_gravity_config.gain == 2500 && PitchCtrl.spd_pid.Ki == 6000);
@@ -143,6 +144,7 @@ int main(int argc, char **argv)
     command("gravity:1\n", TUNING_BAD_PARAMETER);
     command("parameters:2500,66,6000\n", TUNING_OK);
     command("source:1\n", TUNING_NOT_ENABLED);
+    command("yaw_wave:3,30,10\n", TUNING_NOT_ENABLED);
     assert(NX_GetSource() == 0);
     rc.rc.s[1] = 2;
     rc_online = 0;
@@ -176,6 +178,52 @@ int main(int argc, char **argv)
         assert(NX_data.fire == 0 && NX_data.rev == 0);
     }
     command("yaw:181\n", TUNING_OUT_OF_RANGE);
+    /* 高频目标由2 ms控制路径生成，30 Hz一秒应有30轮，且不能改Pitch。 */
+    YawCtrl.nowAbsoluteAngle = 0.2f;
+    command("yaw_wave:3,30.1,1\n", TUNING_OUT_OF_RANGE);
+    command("yaw_wave:0,30,1\n", TUNING_OUT_OF_RANGE);
+    command("yaw_wave:3,30,0\n", TUNING_OUT_OF_RANGE);
+    command("yaw_wave:3,30,1\n", TUNING_OK);
+    uint32_t wave_start = now_ms;
+    for (unsigned tick = 0; tick < 1000; tick += 2) {
+        now_ms = wave_start + tick;
+        if (tick % 100 == 0)
+            command("yaw_ping:0\n", TUNING_OK);
+        getControlAngles();
+        near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.2f + 3 * PI / 180 * sinf(2 * PI * 30 * tick / 1000));
+        near_value(PitchCtrl.want_AbsoluteAngleCtrl, 5 * PI / 180);
+        assert(NX_data.fire == 0 && NX_data.rev == 0);
+    }
+    float last_wave_target = YawCtrl.want_AbsoluteAngleCtrl;
+    now_ms = wave_start + 1000;
+    getControlAngles();
+    assert(!yaw_wave.active);
+    near_value(YawCtrl.want_AbsoluteAngleCtrl, last_wave_target);
+    command("yaw_ping:0\n", TUNING_NOT_ENABLED);
+    command("yaw_wave:3,30,10\n", TUNING_OK);
+    now_ms += 500;
+    getControlAngles();
+    assert(!yaw_wave.active); /* 断连或窗口关闭，无保活就停止。 */
+    command("yaw_wave:3,30,10\n", TUNING_OK);
+    command("yaw:5\n", TUNING_OK);
+    getControlAngles();
+    assert(!yaw_wave.active);
+    near_value(YawCtrl.want_AbsoluteAngleCtrl, 5 * PI / 180);
+    command("yaw_wave:3,30,10\n", TUNING_OK);
+    command("yaw_stop:0\n", TUNING_OK);
+    assert(!yaw_wave.active);
+    command("yaw_stop:1\n", TUNING_BAD_PARAMETER);
+    command("yaw_wave:3,30,10\n", TUNING_OK);
+    rc_online = 0;
+    getControlAngles();
+    assert(!yaw_wave.active && NX_GetSource() == NX_SOURCE_CAN);
+    rc_online = 1;
+    command("yaw_wave:3,30,10\n", TUNING_WRONG_SOURCE);
+    command("source:1\n", TUNING_OK);
+    getControlAngles();
+    now_ms = 1234; /* 后面的CAN在线超时用例继续使用原来的时基。 */
+    command("target:5\n", TUNING_OK);
+    getControlAngles();
     command("yaw:-181\n", TUNING_OUT_OF_RANGE);
     command("yaw:179\n", TUNING_OK);
     getControlAngles();
@@ -220,7 +268,9 @@ int main(int argc, char **argv)
     command("stream:0\n", TUNING_OK);
     assert(tuning_service_period_ms() == 0);
     command("read:0\n", TUNING_OK);
-    command("stream:19\n", TUNING_OUT_OF_RANGE);
+    command("stream:4\n", TUNING_OUT_OF_RANGE);
+    command("stream:5\n", TUNING_OK);
+    command("stream:19\n", TUNING_OK);
     command("stream:20\n", TUNING_OK);
     command("stream:24\n", TUNING_OK);
     command("stream:20.5\n", TUNING_BAD_PARAMETER);
@@ -257,7 +307,7 @@ int main(int argc, char **argv)
     assert(pitch_gravity_config.gain == 1000);
     command("read:0\n", TUNING_OK);
     assert(irq_key == 0);
-    /* 八通道顺序、单位和最终输出；读取不会改写双环状态。 */
+    /* 十二通道顺序、单位和最终输出；读取不会改写双环状态或门控。 */
     pitch_control_debug.actual_angle_rad = -0.25f;
     pitch_control_debug.target_angle_rad = 0.5f;
     YawCtrl.nowAbsoluteAngle = -179 * PI / 180;
@@ -266,6 +316,11 @@ int main(int argc, char **argv)
     YawCtrl.radspeed = -0.00025f;
     YawCtrl.spd_pid.Pout = 31000;
     YawCtrl.Volt_out = 20000;
+    fire_gate_debug.yaw_error_rad = 0.012f;
+    fire_gate_debug.yaw_threshold_rad = 0.047f / 3.0f;
+    fire_gate_debug.pitch_error_rad = 0.008f;
+    fire_gate_debug.pitch_threshold_rad = 0.043f / 3.0f;
+    fire_gate_debug_t fire_before = fire_gate_debug;
     struct GimbalMotorCtrl_s yaw_before = YawCtrl;
     struct GimbalMotorCtrl_s pitch_before = PitchCtrl;
     snapshot();
@@ -276,6 +331,12 @@ int main(int argc, char **argv)
     assert(channels[4] == 20000 && channels[5] == 1);
     near_value(channels[6], 0.5f * 180 / PI);
     near_value(channels[7], -0.25f * 180 / PI);
+    near_value(channels[8], 0.012f);
+    near_value(channels[9], 0.047f / 3.0f);
+    near_value(channels[10], 0.008f);
+    near_value(channels[11], 0.043f / 3.0f);
+    fire_gate_debug_t fire_after = fire_gate_debug;
+    assert(memcmp(&fire_before, &fire_after, sizeof(fire_before)) == 0);
     assert(memcmp(&YawCtrl, &yaw_before, sizeof(YawCtrl)) == 0);
     assert(memcmp(&PitchCtrl, &pitch_before, sizeof(PitchCtrl)) == 0);
     YawCtrl.Volt_out = 0;
@@ -289,6 +350,18 @@ int main(int argc, char **argv)
     snapshot();
     assert(channels[7] == 0);
     YawCtrl.radspeed = -0.00025f;
+    /* 门控前置条件不满足时上传清零记录，不能保留上一帧的误差/阈值。 */
+    fire_gate_debug = (fire_gate_debug_t){0};
+    snapshot();
+    for (unsigned i = 8; i < 12; ++i)
+        assert(channels[i] == 0);
+    fire_gate_debug = fire_before;
+    fire_gate_debug.yaw_error_rad = NAN;
+    fire_gate_debug.pitch_threshold_rad = INFINITY;
+    snapshot();
+    assert(channels[8] == 0 && channels[11] == 0);
+    assert(isnan(fire_gate_debug.yaw_error_rad) && isinf(fire_gate_debug.pitch_threshold_rad));
+    fire_gate_debug = fire_before;
     /* CAN超时不依赖自瞄模式，串口模拟也不能刷新CAN在线状态。 */
     now_ms = 1334;
     snapshot();
@@ -321,7 +394,7 @@ int main(int argc, char **argv)
 #endif
         assert(fwrite(frame, 1, sizeof(frame), stdout) == sizeof(frame));
     } else {
-        puts("PASS: VOFA codec/service + control gates/parameters/Pitch targets/eight-channel mapping/Yaw speed units/read-only output/CAN timeout/wraparound/nonfinite handling");
+        puts("PASS: VOFA codec/service + control gates/parameters/Pitch targets/twelve-channel mapping/fire error and threshold radians/read-only output/CAN timeout/wraparound/nonfinite handling");
     }
     return 0;
 }
@@ -337,13 +410,15 @@ int main(int argc, char **argv)
                     '-lm', '-o', str(executable)], check=True)
     subprocess.run([str(executable)], check=True)
     frame = subprocess.check_output([str(executable), 'frame'])
-    assert len(frame) == 36 and frame[-4:] == b'\x00\x00\x80\x7f'
-    values = struct.unpack('<8f', frame[:-4])
+    assert len(frame) == 52 and frame[-4:] == b'\x00\x00\x80\x7f'
+    values = struct.unpack('<12f', frame[:-4])
     assert abs(values[0] + 0.25 * 180 / 3.1415926) < 0.0002
     assert abs(values[3] - 179) < 0.0002 and values[4] == 0 and values[5] == 1
     assert abs(values[6] - 0.5 * 180 / 3.1415926) < 0.0002
     assert abs(values[7] + 0.25 * 180 / 3.1415926) < 0.0002
-    print('PASS: independently decoded eight-channel little-endian JustFloat frame')
+    for actual, expected in zip(values[8:], (0.012, 0.047 / 3, 0.008, 0.043 / 3)):
+        assert abs(actual - expected) < 1e-7
+    print('PASS: independently decoded twelve-channel little-endian JustFloat frame')
 
 
 

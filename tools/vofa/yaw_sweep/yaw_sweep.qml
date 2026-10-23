@@ -11,6 +11,7 @@ ResizableRectangle {
     property real frequency: 0.5
     property real duration: 10
     property bool sweeping: false
+    property bool highRate: false
     property real center: 0
     property double startedAt: 0
     property double lastDataAt: 0
@@ -22,10 +23,10 @@ ResizableRectangle {
         }
     }
 
-    width: g_settings.applyHScale(430)
-    height: g_settings.applyVScale(480)
-    minimumWidth: g_settings.applyHScale(410)
-    minimumHeight: g_settings.applyVScale(460)
+    width: g_settings.applyHScale(600)
+    height: g_settings.applyVScale(540)
+    minimumWidth: g_settings.applyHScale(560)
+    minimumHeight: g_settings.applyVScale(480)
     color: "#f5f8fb"
     border.color: "#b9c8d7"
     border.width: 1
@@ -81,22 +82,36 @@ ResizableRectangle {
         amplitude = a;
         frequency = f;
         duration = d;
+        highRate = f > 2;
         center = angle;
         startedAt = Date.now();
         // 只在点击开始时切一次来源；遥控退出后不自动重新接管。
         sys_manager.send_string("source:1\n");
+        if (highRate) {
+            // 30 Hz既要高频生成，也要足够快的采样；仍然只上传8通道。
+            sys_manager.send_string("stream:5\n");
+            sys_manager.send_string("yaw_wave:" + a.toFixed(4) + "," + f.toFixed(4) + "," + d.toFixed(3) + "\n");
+        }
         sweeping = true;
         status = "已发送接管请求；以I3目标角读回为准";
     }
 
     function stop(message) {
+        if (sweeping && highRate && sys_manager.connected) {
+            sys_manager.send_string("yaw_stop:0\n");
+            sys_manager.send_string("stream:20\n");
+        }
         sweeping = false;
         status = message;
         // 不自动回中心或恢复CAN，避免停止按钮引起额外转动。
     }
 
     Timer {
-        interval: 42
+        interval: {
+            if (root.highRate)
+                return 100;
+            return 42;
+        }
         repeat: true
         running: root.sweeping
         onTriggered: {
@@ -110,36 +125,47 @@ ResizableRectangle {
                 root.stop("本轮结束，保持最后目标；退出自瞄请用遥控器");
                 return;
             }
+            if (root.highRate) {
+                // Timer只负责保活；实际正弦目标由C板每2 ms计算。
+                sys_manager.send_string("yaw_ping:0\n");
+                root.status = "C板高频生成 " + root.frequency.toFixed(1) + " Hz · " + elapsed.toFixed(1) + " s（Δt用5 ms）";
+                return;
+            }
             var angle = Motion.target(root.center, root.amplitude, root.frequency, elapsed);
             sys_manager.send_string("yaw:" + angle.toFixed(4) + "\n");
             root.status = "发送目标 " + angle.toFixed(2) + "° · " + elapsed.toFixed(1) + " s";
         }
     }
 
-    ColumnLayout {
+    ScrollView {
+        id: scroller
         anchors.fill: parent
         anchors.margins: 14
+        clip: true
+    ColumnLayout {
+        width: scroller.availableWidth
         spacing: 10
-        Label { text: "Yaw 小幅连续摆动"; font.bold: true; font.pixelSize: 18 }
-        Label { text: "约24次/秒下发 · 以点击开始时的实际Yaw为中心"; color: "#4c6075" }
+        Label { text: "Yaw 小幅连续摆动"; font.bold: true; font.pixelSize: g_settings.applyVScale(26) }
+        Label { text: "≤2 Hz：视觉24 Hz模拟；>2 Hz：C板高频生成"; font.pixelSize: g_settings.applyVScale(18); wrapMode: Text.Wrap; Layout.fillWidth: true; color: "#4c6075" }
         GridLayout {
             columns: 2
             Layout.fillWidth: true
             enabled: !root.sweeping
-            Label { text: "左右幅度（±°）" }
-            TextField { id: amplitudeInput; text: root.amplitude.toString(); Layout.fillWidth: true }
-            Label { text: "摆动频率（Hz）" }
-            TextField { id: frequencyInput; text: root.frequency.toString(); Layout.fillWidth: true }
-            Label { text: "本轮时长（秒）" }
-            TextField { id: durationInput; text: root.duration.toString(); Layout.fillWidth: true }
+            Label { text: "左右幅度（±°）"; font.pixelSize: g_settings.applyVScale(20) }
+            TextField { id: amplitudeInput; text: root.amplitude.toString(); font.pixelSize: g_settings.applyVScale(24); Layout.fillWidth: true }
+            Label { text: "摆动频率（0.1～30 Hz）"; font.pixelSize: g_settings.applyVScale(20) }
+            TextField { id: frequencyInput; text: root.frequency.toString(); font.pixelSize: g_settings.applyVScale(24); Layout.fillWidth: true }
+            Label { text: "本轮时长（秒）"; font.pixelSize: g_settings.applyVScale(20) }
+            TextField { id: durationInput; text: root.duration.toString(); font.pixelSize: g_settings.applyVScale(24); Layout.fillWidth: true }
         }
         RowLayout {
-            Button { text: "开始摆动"; enabled: !root.sweeping; onClicked: root.start() }
-            Button { text: "停止发送"; enabled: root.sweeping; onClicked: root.stop("已停止发送，保持最后目标") }
+            Button { text: "开始摆动"; font.pixelSize: g_settings.applyVScale(20); enabled: !root.sweeping; onClicked: root.start() }
+            Button { text: "停止发送"; font.pixelSize: g_settings.applyVScale(20); enabled: root.sweeping; onClicked: root.stop("已停止发送，保持最后目标") }
         }
-        Label { text: root.status; wrapMode: Text.Wrap; Layout.fillWidth: true }
-        Label { text: "需烧录支持yaw命令的固件；不会自动开始，结束不自动回中。"; wrapMode: Text.Wrap; Layout.fillWidth: true; color: "#4c6075" }
+        Label { text: root.status; font.pixelSize: g_settings.applyVScale(18); wrapMode: Text.Wrap; Layout.fillWidth: true }
+        Label { text: "高频需烧录新版；先用小幅度。30 Hz、±3°的目标峰值速度约565°/s，不代表电机能达到。"; font.pixelSize: g_settings.applyVScale(18); wrapMode: Text.Wrap; Layout.fillWidth: true; color: "#4c6075" }
         Item { Layout.fillHeight: true }
+    }
     }
 
     function get_widget_ctx() {
@@ -151,5 +177,10 @@ ResizableRectangle {
     function set_widget_ctx(ctx) {
         sweeping = false;
         __set_ctx__(root, ctx.ctx, ref);
+        // 旧布局保存的尺寸较小，恢复后也要容得下大字体。
+        if (width < minimumWidth)
+            width = minimumWidth;
+        if (height < minimumHeight)
+            height = minimumHeight;
     }
 }
