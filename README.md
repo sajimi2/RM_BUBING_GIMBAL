@@ -150,7 +150,8 @@ Pitch 观察：`pitch_control_debug.friction_out` 是本周期补的差额，`fr
 1. 处于自瞄、遥控在线、非无力；视觉帧来自 CAN（串口模拟不开火）；
 2. 最近一帧视觉数据不超过 100 ms，避免视觉掉线后沿用旧的 `fire=1`；
 3. `fire=1`，且 `rev` 的 bit0（只瞄准不发射）为 0；
-4. 距离有效：`rev` 按无符号数，bit1～15 为距离（cm），0 或超过 15 m 都算无效；
+4. 距离：`rev` 按无符号数，bit1～15 为距离（cm）。小于 30 cm（包括 0，即视觉没给）或超过 15 m 算无效，
+   无效时**按 3 m 计算允许误差**，照常判断，`fire_gate_debug.distance_fallback` 置 1；
 5. 两轴误差 |目标角 − 实际角| 都不超过各自的允许误差。
 
 允许误差按距离计算：`半宽(m) / 距离(m) − 散布角(rad)`，再封顶 `fire_max_rad`（3°）；
@@ -165,7 +166,7 @@ Pitch 观察：`pitch_control_debug.friction_out` 是本周期补的差额，`fr
 | `fire_hold_ms` | 10 | 需连续对准的时间，必须小于视觉帧间隔约 42 ms |
 
 `fire_gate_debug` 按检查顺序记录帧龄、距离、两轴阈值和误差、已保持时间及每条是否满足，可在 Live Watch 里看卡在哪一步。
-视觉必须同时开始下发距离：`rev` 为 0 时距离无效，永远不会开火。
+视觉还没下发距离时（`rev` 为 0），按 3 m 的允许误差开火；视觉改好后自动改用实际距离。
 
 宿主测试（需要 gcc）：`python -X utf8 tests/host/test_pitch_integral.py`、
 `python -X utf8 tests/host/test_fit_pitch_gravity.py`。

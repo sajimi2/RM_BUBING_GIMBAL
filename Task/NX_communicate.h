@@ -10,7 +10,7 @@ typedef struct __attribute__((packed))
     int16_t yaw;
     int16_t pitch;
 	uint8_t fire;    // 1: 视觉允许开火，电控还要确认云台已对准才真正开火
-	int16_t rev;     // 按无符号数使用：bit0 = 1 只瞄准不发射；bit1~15 = 目标距离（cm），0表示没给
+	int16_t rev;     // 按无符号数使用：bit0 = 1 只瞄准不发射；bit1~15 = 目标距离（cm），0或不合理时电控按3m处理
 } CAN_Send_to_MCU;
 
 // MCU -> 上位机

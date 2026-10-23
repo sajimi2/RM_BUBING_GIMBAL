@@ -92,7 +92,9 @@
 #define FIRE_MAX_RAD_DEFAULT       0.0524f // 约3°，近处允许误差封顶
 #define FIRE_HOLD_MS_DEFAULT       10U     // 误差连续在范围内满这么久才开火，必须小于视觉帧间隔约42ms
 #define FIRE_FRAME_TIMEOUT_MS      100U    // 视觉帧超过这么久没更新，视为视觉掉线，不开火
+#define FIRE_DISTANCE_MIN_CM       30U     // 距离小于30cm视为无效（包括0，即视觉没给距离）
 #define FIRE_DISTANCE_MAX_CM       1500U   // 距离超过15m视为数据错误
+#define FIRE_DISTANCE_DEFAULT_M    3.0f    // 距离无效时按3m算允许误差，视觉还没下发距离时也能开火
 
 // 位置环输出限幅
 #define YAW_AGL_SPD_MAX_OUT (50.0f)
@@ -1233,18 +1235,31 @@ static uint8_t checkFireWindow(fire_gate_debug_t *debug)
 
     // 取出距离：rev的bit1~15，单位cm；0表示视觉没给距离
     const uint16_t distanceCm = fire_frame_rev >> 1;
-    if (distanceCm == 0)
+    uint8_t distanceValid = 1;
+
+    // 距离太小：包括0（视觉没给距离，例如视觉那边还没改协议），按无效处理
+    if (distanceCm < FIRE_DISTANCE_MIN_CM)
     {
-        return 0;
+        distanceValid = 0;
     }
     // 距离大得不合理，按数据错误处理
     if (distanceCm > FIRE_DISTANCE_MAX_CM)
     {
-        return 0;
+        distanceValid = 0;
     }
-    const fp32 distance = (fp32)distanceCm * 0.01f;
+
+    // 距离有效：用视觉给的距离；无效：按默认3m算允许误差，照常判断能不能开火
+    fp32 distance = FIRE_DISTANCE_DEFAULT_M;
+    if (distanceValid == 1)
+    {
+        distance = (fp32)distanceCm * 0.01f;
+    }
+    else
+    {
+        debug->distance_fallback = 1;
+    }
     debug->distance_m = distance;
-    debug->distance_valid = 1;
+    debug->distance_valid = distanceValid;
 
     // 按距离算两个轴的允许误差
     const fp32 yawThreshold = calcFireThreshold(fire_yaw_half_m, distance);

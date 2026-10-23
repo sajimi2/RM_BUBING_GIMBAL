@@ -498,25 +498,34 @@ static void fire_gate_tests(void)
     assert(fire_after_frame(1, 0, 300));
     near_value(fire_gate_debug.yaw_threshold_rad, 0.047f / 3.0f - 0.002f);
 
-    /* 视觉不允许开火、只瞄准不发射、没给距离、距离不合理：都不开火。 */
+    /* 视觉不允许开火、只瞄准不发射：不开火。 */
     setup_fire();
     assert(!fire_after_frame(0, 0, 300) && fire_gate_debug.frame_fresh && !fire_gate_debug.vision_fire);
     assert(!fire_after_frame(1, 1, 300));
-    assert(!fire_after_frame(1, 0, 0));
-    assert(!fire_after_frame(1, 0, FIRE_DISTANCE_MAX_CM + 1));
-    assert(!fire_after_frame(1, 0, 0x7FFF)); /* 最高位为1，int16为负数也按无符号处理 */
-    assert(fire_after_frame(1, 0, FIRE_DISTANCE_MAX_CM) == 0); /* 15 m 太远，低于下限 */
-    assert(fire_gate_debug.distance_valid);
+    /* 15 m 是有效距离，但太远，低于下限，不开火（不会被当成无效改按3m）。 */
+    assert(fire_after_frame(1, 0, FIRE_DISTANCE_MAX_CM) == 0);
+    assert(fire_gate_debug.distance_valid && !fire_gate_debug.distance_fallback);
 
-    /* 距离为 0 本身就判无效（不靠后面除以 0 的结果兜底）。 */
+    /* 距离无效（0、小于30cm、大于15m、最高位为1）：按默认 3 m 的允许误差判断，照常可以开火。 */
+    const uint16_t bad_distances[] = {0, FIRE_DISTANCE_MIN_CM - 1, FIRE_DISTANCE_MAX_CM + 1, 0x7FFF};
+    for (int i = 0; i < 4; ++i) {
+        setup_fire();
+        assert(fire_after_frame(1, 0, bad_distances[i]));
+        assert(!fire_gate_debug.distance_valid && fire_gate_debug.distance_fallback);
+        near_value(fire_gate_debug.distance_m, FIRE_DISTANCE_DEFAULT_M);
+        near_value(fire_gate_debug.yaw_threshold_rad, 0.047f / 3.0f);
+        near_value(fire_gate_debug.pitch_threshold_rad, 0.043f / 3.0f);
+    }
+    /* 按默认 3 m 时，误差超过 3 m 的允许误差就不开火。 */
     setup_fire();
-    assert(!fire_after_frame(1, 0, 0) && !fire_gate_debug.distance_valid);
-    /* 距离上限独立生效：把半宽调大，使 15 m 以外阈值也够，仍按数据错误拒绝。 */
+    YawCtrl.want_AbsoluteAngleCtrl = 0.047f / 3.0f + 0.0002f;
+    assert(!fire_after_frame(1, 0, 0) && fire_gate_debug.distance_fallback && !fire_gate_debug.aimed);
+    /* 最小有效距离 30 cm 用视觉给的距离（近处阈值封顶 3°）。 */
     setup_fire();
-    fire_yaw_half_m = 1.0f;
-    fire_pitch_half_m = 1.0f;
-    assert(fire_after_frame(1, 0, FIRE_DISTANCE_MAX_CM));
-    assert(!fire_after_frame(1, 0, FIRE_DISTANCE_MAX_CM + 1) && !fire_gate_debug.distance_valid);
+    assert(fire_after_frame(1, 0, FIRE_DISTANCE_MIN_CM));
+    assert(fire_gate_debug.distance_valid && !fire_gate_debug.distance_fallback);
+    near_value(fire_gate_debug.distance_m, 0.3f);
+    near_value(fire_gate_debug.yaw_threshold_rad, FIRE_MAX_RAD_DEFAULT);
 
     /* 串口模拟来源不开火。 */
     setup_fire();

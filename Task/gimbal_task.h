@@ -73,7 +73,7 @@ extern volatile fp32 yaw_friction_error_rad;
 typedef struct
 {
     uint32_t frame_age_ms;     // 最近一帧视觉数据距现在多久
-    fp32 distance_m;           // 视觉给的距离
+    fp32 distance_m;           // 本次计算用的距离：视觉给的距离，无效时为默认3m
     fp32 yaw_threshold_rad;    // 按距离算出的Yaw允许误差
     fp32 pitch_threshold_rad;  // 按距离算出的Pitch允许误差
     fp32 yaw_error_rad;        // Yaw离目标角多远（绝对值）
@@ -81,7 +81,8 @@ typedef struct
     uint32_t hold_ms;          // 已经连续对准多久
     uint8_t frame_fresh;       // 视觉帧没有过期
     uint8_t vision_fire;       // 视觉允许开火（fire=1）
-    uint8_t distance_valid;    // 距离有效
+    uint8_t distance_valid;    // 视觉给的距离有效
+    uint8_t distance_fallback; // 视觉给的距离无效，已按默认3m计算允许误差
     uint8_t threshold_ok;      // 允许误差不小于下限（不算太远）
     uint8_t aimed;             // 两个轴都在允许误差内
     uint8_t allowed;           // 最终允许开火
