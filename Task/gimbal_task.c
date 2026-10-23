@@ -69,15 +69,18 @@
 #define PITCH_GRAVITY_MAX_OUT         5000.0f // 补偿自身的输出限幅
 #define PITCH_GRAVITY_SLEW_PER_SECOND 20000.0f // 补偿每秒最多变化的控制量
 
-// Pitch静摩擦补偿（启动补足），输出单位与速度环PID相同，门槛需实车测定
+// 静摩擦补偿（启动补足），Pitch和Yaw共用同一套判断，输出单位与速度环PID相同，门槛需实车测定
 /* 确认停住、离目标还远、PID方向对但推不动时，把PID输出补到门槛值。
  * 补的是差额（门槛 - PID），不是在PID上再加一个固定值。门槛为0即关闭该方向。 */
-#define PITCH_FRICTION_UP_OUT_DEFAULT    750.0f      // 抬头方向的门槛，默认关闭
-#define PITCH_FRICTION_DOWN_OUT_DEFAULT  750.0f      // 低头方向的门槛，默认关闭
-#define PITCH_FRICTION_MAX_OUT           5000.0f   // 门槛允许的最大值，超过视为填错，按关闭处理
+#define FRICTION_MAX_OUT                 5000.0f   // 门槛允许的最大值，超过视为填错，按关闭处理
+#define FRICTION_STILL_MS                100U      // 连续静止满这么久才算停住，单位ms
+#define FRICTION_STILL_DRIFT_RAD         0.001745f // 约0.1°，静止计时期间允许的角度漂移
+#define PITCH_FRICTION_UP_OUT_DEFAULT    750.0f    // 抬头方向的门槛，实车初值
+#define PITCH_FRICTION_DOWN_OUT_DEFAULT  750.0f    // 低头方向的门槛，实车初值
 #define PITCH_FRICTION_ERROR_RAD_DEFAULT 0.0087f   // 约0.5°，离目标比它近时不补足
-#define PITCH_FRICTION_STILL_MS          100U      // 连续静止满这么久才算停住，单位ms
-#define PITCH_FRICTION_STILL_DRIFT_RAD   0.001745f // 约0.1°，静止计时期间允许的角度漂移
+#define YAW_FRICTION_POS_OUT_DEFAULT     0.0f      // Yaw角度增大方向的门槛，默认关闭；建议从600开始试
+#define YAW_FRICTION_NEG_OUT_DEFAULT     0.0f      // Yaw角度减小方向的门槛，默认关闭；建议从600开始试
+#define YAW_FRICTION_ERROR_RAD_DEFAULT   0.0087f   // 约0.5°，离目标比它近时不补足
 
 // 开火门控：视觉允许开火、视觉帧没过期、云台已对准且保持一小段时间，才允许拨弹
 /* 允许误差（rad）= 允许偏离的半宽（m）/ 距离（m）- 散布角（rad），再做上下限。
@@ -204,10 +207,23 @@ static fp32 pitch_gravity_output; // 上一周期的补偿，用于限制本周�
 volatile fp32 pitch_friction_up_out = PITCH_FRICTION_UP_OUT_DEFAULT;
 volatile fp32 pitch_friction_down_out = PITCH_FRICTION_DOWN_OUT_DEFAULT;
 volatile fp32 pitch_friction_error_rad = PITCH_FRICTION_ERROR_RAD_DEFAULT;
-// 静止计时状态
-static uint8_t pitch_still_valid;        // 0表示还没开始计时
-static uint32_t pitch_still_start_time;  // 本次静止从什么时候开始，ms
-static fp32 pitch_still_start_angle;     // 本次静止开始时的角度，rad
+volatile fp32 yaw_friction_pos_out = YAW_FRICTION_POS_OUT_DEFAULT;
+volatile fp32 yaw_friction_neg_out = YAW_FRICTION_NEG_OUT_DEFAULT;
+volatile fp32 yaw_friction_error_rad = YAW_FRICTION_ERROR_RAD_DEFAULT;
+
+// 静摩擦补偿的运行状态，每个轴一份；后三项每周期刷新，可在调试器里观察
+typedef struct
+{
+    uint8_t still_valid;        // 0表示还没开始静止计时
+    uint32_t still_start_time;  // 本次静止从什么时候开始，ms
+    fp32 still_start_angle;     // 本次静止开始时的角度，rad
+    uint8_t still;              // 本周期已确认停住
+    uint8_t active;             // 本周期补偿生效
+    fp32 out;                   // 本周期补上的差额，不补时为0
+} friction_state_t;
+
+static friction_state_t pitch_friction_state;
+static friction_state_t yaw_friction_state;
 
 // 开火门控参数，可在调试器里修改
 volatile fp32 fire_yaw_half_m = FIRE_YAW_HALF_M_DEFAULT;
@@ -345,8 +361,9 @@ static void initGimbalCtrl(void)
     YawCtrl.ECDPoint = &(get_yaw_gimbal_motor_measure_point()->ecd);
     PitchCtrl.ECDPoint = &(get_pitch_gimbal_motor_measure_point()->ecd);
 
-    // 初始化转速指针，只有Pitch的静摩擦补偿用到
+    // 初始化转速指针，静摩擦补偿用它判断是否停住
     PitchCtrl.SpeedRpmPoint = &(get_pitch_gimbal_motor_measure_point()->speed_rpm);
+    YawCtrl.SpeedRpmPoint = &(get_yaw_gimbal_motor_measure_point()->speed_rpm);
 
     // PID初始化
     PID_init(&(YawCtrl.spd_pid), PID_POSITION, yawSpdPIDco, YAW_VOLT_MAX_OUT, YAW_VOLT_MAX_IOUT);
@@ -762,65 +779,78 @@ static fp32 calcPitchGravity(pitch_control_debug_t *debug)
 }
 
 /**
- * @brief 从当前时刻、当前角度重新开始静止计时
+ * @brief 清空一个轴的静摩擦补偿状态，下次要重新确认停住
  */
-static void restartPitchStillTimer(void)
+static void resetFrictionState(friction_state_t *state)
 {
-    pitch_still_start_time = PitchCtrl.nowTime;
-    pitch_still_start_angle = PitchCtrl.nowAbsoluteAngle;
-    pitch_still_valid = 1;
+    state->still_valid = 0;
+    state->still = 0;
+    state->active = 0;
+    state->out = 0.0f;
 }
 
 /**
- * @brief 判断Pitch是否已经确认停住
+ * @brief 从当前时刻、当前角度重新开始静止计时
+ */
+static void restartStillTimer(const struct GimbalMotorCtrl_s *c, friction_state_t *state)
+{
+    state->still_start_time = c->nowTime;
+    state->still_start_angle = c->nowAbsoluteAngle;
+    state->still_valid = 1;
+}
+
+/**
+ * @brief 判断一个轴是否已经确认停住
  *
  * 电机转速是整数rpm，慢慢蠕动时也会读到0，所以还要看角度漂移：
  * 转速为0、角度离计时起点不超过0.1°，连续满100 ms才算停住。
  * 一旦转动或漂移超出，从当前时刻、当前角度重新计时。
+ * 注意转速是电机相对底盘的转速：底盘在转（例如小陀螺）时Yaw不会被判为停住。
  * @return 1表示已确认停住
  */
-static uint8_t isPitchStill(void)
+static uint8_t isAxisStill(const struct GimbalMotorCtrl_s *c, friction_state_t *state)
 {
     // 没有转速反馈，无法判断是否停住，按"在动"处理
-    if (PitchCtrl.SpeedRpmPoint == NULL)
+    if (c->SpeedRpmPoint == NULL)
     {
-        pitch_still_valid = 0;
+        state->still_valid = 0;
         return 0;
     }
 
     // 角度无效，无法判断是否停住，按"在动"处理
-    if (!isfinite(PitchCtrl.nowAbsoluteAngle))
+    if (!isfinite(c->nowAbsoluteAngle))
     {
-        pitch_still_valid = 0;
+        state->still_valid = 0;
         return 0;
     }
 
     // 刚上电或刚从无力恢复，还没开始计时：从现在开始计时
-    if (pitch_still_valid == 0)
+    if (state->still_valid == 0)
     {
-        restartPitchStillTimer();
+        restartStillTimer(c, state);
         return 0;
     }
 
     // 电机在转：重新计时
-    const int16_t speedRpm = *(PitchCtrl.SpeedRpmPoint);
+    const int16_t speedRpm = *(c->SpeedRpmPoint);
     if (speedRpm != 0)
     {
-        restartPitchStillTimer();
+        restartStillTimer(c, state);
         return 0;
     }
 
     // 转速读数为0，但角度在慢慢漂，说明在蠕动：重新计时
-    const fp32 drift = fabsf(PitchCtrl.nowAbsoluteAngle - pitch_still_start_angle);
-    if (drift > PITCH_FRICTION_STILL_DRIFT_RAD)
+    // Yaw会在±180°处跳变，所以先把角度差归一化
+    const fp32 drift = fabsf(radFormat(c->nowAbsoluteAngle - state->still_start_angle));
+    if (drift > FRICTION_STILL_DRIFT_RAD)
     {
-        restartPitchStillTimer();
+        restartStillTimer(c, state);
         return 0;
     }
 
     // 静止时间还不够，继续等
-    const uint32_t stillTime = PitchCtrl.nowTime - pitch_still_start_time;
-    if (stillTime < PITCH_FRICTION_STILL_MS)
+    const uint32_t stillTime = c->nowTime - state->still_start_time;
+    if (stillTime < FRICTION_STILL_MS)
     {
         return 0;
     }
@@ -846,7 +876,7 @@ static fp32 checkFrictionThreshold(fp32 threshold)
     }
 
     // 超过允许的最大值，可能多填了一位，按关闭处理
-    if (threshold > PITCH_FRICTION_MAX_OUT)
+    if (threshold > FRICTION_MAX_OUT)
     {
         return 0.0f;
     }
@@ -855,31 +885,39 @@ static fp32 checkFrictionThreshold(fp32 threshold)
 }
 
 /**
- * @brief Pitch静摩擦补偿（启动补足）
+ * @brief 计算一个轴本周期的静摩擦补偿量（启动补足），结果同时记在state里
  *
  * 下面几条全部满足才补：
- * 1. 已确认停住，见isPitchStill；
- * 2. 离目标超过pitch_friction_error_rad，目标附近不补，避免在目标点来回顶；
+ * 1. 已确认停住，见isAxisStill；
+ * 2. 离目标超过死区，目标附近不补，避免在目标点来回顶；
  * 3. 位置环要的速度、速度环PID输出，都指向目标方向；
  * 4. PID输出还没达到门槛。
  * 补的是差额：PID已有600、门槛750，只补150。
  * PID已超过门槛、正在刹车、已经转起来，都不补。补偿不写进积分，只在本周期生效。
- * @param pidOut 速度环P+I+D，不含重力补偿
- * @return 本周期要补的量，PID内部方向（正为抬头）；不补时为0
+ * 正方向指PID内部的正方向，也就是角度增大的方向：Pitch为抬头，Yaw为角度读数增大。
+ * @param pidOut 速度环P+I+D，Pitch不含重力补偿
+ * @param posThreshold 正方向门槛
+ * @param negThreshold 负方向门槛，填正数
+ * @param errorBand 死区，单位rad
+ * @return 本周期要补的量，PID内部方向；不补时为0
  */
-static fp32 calcPitchFriction(fp32 pidOut, pitch_control_debug_t *debug)
+static fp32 calcFrictionFill(const struct GimbalMotorCtrl_s *c, friction_state_t *state, fp32 pidOut,
+                             fp32 posThreshold, fp32 negThreshold, fp32 errorBand)
 {
-    const fp32 upThreshold = checkFrictionThreshold(pitch_friction_up_out);
-    const fp32 downThreshold = checkFrictionThreshold(pitch_friction_down_out);
-    const fp32 errorBand = pitch_friction_error_rad;
+    const fp32 posOut = checkFrictionThreshold(posThreshold);
+    const fp32 negOut = checkFrictionThreshold(negThreshold);
     // 本周期角度环误差（目标 - 实际），gimbal_PID_calc 已归一化到 [-PI, PI]
-    const fp32 angleError = PitchCtrl.agl_pid.error[0];
+    const fp32 angleError = c->agl_pid.error[0];
     // 位置环输出，就是交给速度环的目标速度
-    const fp32 wantSpeed = PitchCtrl.agl_pid.out;
+    const fp32 wantSpeed = c->agl_pid.out;
+
+    // 先清掉上周期的结果，下面只在真正补偿时再置位
+    state->active = 0;
+    state->out = 0.0f;
 
     // 每周期都要更新静止计时，所以放在最前面
-    const uint8_t still = isPitchStill();
-    debug->friction_still = still;
+    const uint8_t still = isAxisStill(c, state);
+    state->still = still;
 
     // 没有确认停住：正在转或刚停下，交给PID自己处理
     if (still == 0)
@@ -897,50 +935,52 @@ static fp32 calcPitchFriction(fp32 pidOut, pitch_control_debug_t *debug)
         return 0.0f;
     }
 
-    // 目标在上方，需要抬头
+    // 目标在正方向
     if (angleError > errorBand)
     {
-        // 位置环要的不是抬头方向的速度，不补
+        // 位置环要的不是正方向的速度，不补
         if (wantSpeed <= 0.0f)
         {
             return 0.0f;
         }
-        // PID没有往抬头方向推（例如正在刹车），不补
+        // PID没有往正方向推（例如正在刹车），不补
         if (pidOut <= 0.0f)
         {
             return 0.0f;
         }
         // PID已经达到门槛，不用补；门槛为0时也从这里退出
-        if (pidOut >= upThreshold)
+        if (pidOut >= posOut)
         {
             return 0.0f;
         }
         // 只补差额，让PID加补偿正好等于门槛
-        debug->friction_active = 1;
-        return upThreshold - pidOut;
+        state->active = 1;
+        state->out = posOut - pidOut;
+        return state->out;
     }
 
-    // 目标在下方，需要低头
+    // 目标在负方向
     if (angleError < -errorBand)
     {
-        // 位置环要的不是低头方向的速度，不补
+        // 位置环要的不是负方向的速度，不补
         if (wantSpeed >= 0.0f)
         {
             return 0.0f;
         }
-        // PID没有往低头方向推（例如正在刹车），不补
+        // PID没有往负方向推（例如正在刹车），不补
         if (pidOut >= 0.0f)
         {
             return 0.0f;
         }
         // PID已经达到门槛，不用补；门槛为0时也从这里退出
-        if (pidOut <= -downThreshold)
+        if (pidOut <= -negOut)
         {
             return 0.0f;
         }
         // 只补差额，让PID加补偿正好等于负的门槛
-        debug->friction_active = 1;
-        return -downThreshold - pidOut;
+        state->active = 1;
+        state->out = -negOut - pidOut;
+        return state->out;
     }
 
     // 已在目标附近的死区内，不补
@@ -973,7 +1013,11 @@ static fp32 limitPitchOutput(fp32 gravityOut, fp32 lastIout, pitch_control_debug
     range_limit_inside(pid->out, pid->max_out);
 
     // PID推不动时补到门槛；补偿不写进积分，只加在本周期总输出上
-    const fp32 frictionOut = calcPitchFriction(pidOut, debug);
+    const fp32 frictionOut = calcFrictionFill(&PitchCtrl, &pitch_friction_state, pidOut,
+                                              pitch_friction_up_out, pitch_friction_down_out,
+                                              pitch_friction_error_rad);
+    debug->friction_still = pitch_friction_state.still;
+    debug->friction_active = pitch_friction_state.active;
 
     // 总输出使用未限幅的PID值，先加两项补偿再限幅，不能直接用pid->out
     totalOut = pidOut + frictionOut + gravityOut;
@@ -1048,12 +1092,25 @@ void unitPID_calc(void)
     gimbal_PID_calc(&(YawCtrl.agl_pid), YawCtrl.nowAbsoluteAngle, YawCtrl.want_AbsoluteAngleCtrl);
     // Yaw轴速度环PID计算
     PID_calc(&(YawCtrl.spd_pid), YawCtrl.radspeed, YawCtrl.agl_pid.out);
-    YawCtrl.Volt_out = YawCtrl.spd_pid.out;
+    // Yaw静摩擦补偿：PID推不动时补到门槛；补偿不写进积分，只加在本周期输出上
+    const fp32 yawFrictionOut = calcFrictionFill(&YawCtrl, &yaw_friction_state, YawCtrl.spd_pid.out,
+                                                 yaw_friction_pos_out, yaw_friction_neg_out,
+                                                 yaw_friction_error_rad);
+    fp32 yawTotalOut = YawCtrl.spd_pid.out + yawFrictionOut;
+    // 保险：门槛上限远小于输出上限，正常碰不到，但加完补偿后仍统一限幅一次
+    range_limit_inside(yawTotalOut, YAW_VOLT_MAX_OUT);
+    YawCtrl.Volt_out = (int16_t)yawTotalOut;
 
-    // Yaw轴无力标志检查
+    // Yaw轴无力：输出清零，恢复后要重新确认停住
     if (YawCtrl.nopowerflag)
     {
         YawCtrl.Volt_out = 0;
+        resetFrictionState(&yaw_friction_state);
+    }
+    // 遥控掉线：主循环会把输出清零，这里让静止计时作废，恢复后重新确认停住
+    if (rc_online == 0)
+    {
+        resetFrictionState(&yaw_friction_state);
     }
 
     /* 无力或遥控掉线时不积累 Pitch 积分，避免恢复使能后带入停机误差。 */
@@ -1062,7 +1119,7 @@ void unitPID_calc(void)
         PID_clear(&(PitchCtrl.spd_pid));
         PID_clear(&(PitchCtrl.agl_pid));
         pitch_gravity_output = 0.0f;
-        pitch_still_valid = 0; // 恢复使能后重新确认静止
+        resetFrictionState(&pitch_friction_state); // 恢复使能后重新确认静止
         PitchCtrl.Volt_out = 0;
         pitch_control_debug = debug;
         return;

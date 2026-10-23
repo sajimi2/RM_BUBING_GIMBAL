@@ -62,6 +62,11 @@ extern volatile fp32 pitch_i_separation_rad;
 extern volatile fp32 pitch_friction_up_out;
 extern volatile fp32 pitch_friction_down_out;
 extern volatile fp32 pitch_friction_error_rad;
+/* Yaw静摩擦补偿：角度增大/减小方向的门槛（0为关闭）、死区（rad）。
+ * 补偿状态可在调试器里看 yaw_friction_state 的 still / active / out。 */
+extern volatile fp32 yaw_friction_pos_out;
+extern volatile fp32 yaw_friction_neg_out;
+extern volatile fp32 yaw_friction_error_rad;
 
 /* 开火门控的调试记录，每个控制周期刷新，只供观察。标志为1表示该条件已满足。
  * 条件按顺序检查，前面一条不满足时，后面的字段保持为0。 */

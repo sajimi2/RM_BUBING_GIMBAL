@@ -54,7 +54,8 @@ declarations = source[source.index('#define GIMBAL_TASK_CTRL_TIME'):
                       source.index('// 模式相关')]
 functions = '\n'.join(function(name) for name in (
     'radFormat', 'gimbal_PID_calc', 'calcPitchGravity',
-    'restartPitchStillTimer', 'isPitchStill', 'checkFrictionThreshold', 'calcPitchFriction',
+    'resetFrictionState', 'restartStillTimer', 'isAxisStill', 'checkFrictionThreshold',
+    'calcFrictionFill',
     'limitPitchOutput', 'pitch_speed_pid_calc', 'unitPID_calc',
     'recordFireFrame', 'calcFireThreshold', 'checkFireWindow', 'updateFireGate',
     'gimbal_fire_allowed'))
@@ -69,6 +70,7 @@ static void near_value_at(float a, float b, int line)
 #define TEST_KI 8000.0f /* 仅用于验证积分路径，不是工程默认值 */
 
 static int16_t test_pitch_rpm; /* 模拟 Pitch 6020 的整数 rpm 反馈 */
+static int16_t test_yaw_rpm;   /* 模拟 Yaw 6020 的整数 rpm 反馈 */
 
 static void setup_default(void)
 {
@@ -78,13 +80,20 @@ static void setup_default(void)
     pitch_gravity_config.gain = 0;
     pitch_gravity_config.offset_rad = 0;
     pitch_gravity_output = 0;
-    /* 摩擦补偿保持工程默认（门槛0=关闭），基线用例在补偿代码运行时验证输出不变。 */
-    pitch_friction_up_out = PITCH_FRICTION_UP_OUT_DEFAULT;
-    pitch_friction_down_out = PITCH_FRICTION_DOWN_OUT_DEFAULT;
+    /* 基线用例显式关闭摩擦补偿（门槛0），不依赖工程里正在调试的默认门槛；
+     * 补偿代码照常运行，用来验证门槛为0时输出与基线逐周期一致。 */
+    pitch_friction_up_out = 0;
+    pitch_friction_down_out = 0;
     pitch_friction_error_rad = PITCH_FRICTION_ERROR_RAD_DEFAULT;
-    pitch_still_valid = 0;
+    yaw_friction_pos_out = 0;
+    yaw_friction_neg_out = 0;
+    yaw_friction_error_rad = YAW_FRICTION_ERROR_RAD_DEFAULT;
+    resetFrictionState(&pitch_friction_state);
+    resetFrictionState(&yaw_friction_state);
     test_pitch_rpm = 0;
+    test_yaw_rpm = 0;
     PitchCtrl.SpeedRpmPoint = &test_pitch_rpm;
+    YawCtrl.SpeedRpmPoint = &test_yaw_rpm;
     rc_online = 1;
     PID_init(&PitchCtrl.spd_pid, PID_POSITION, pitchSpdPIDco,
              PITCH_VOLT_MAX_OUT, PITCH_VOLT_MAX_IOUT);
@@ -125,6 +134,8 @@ static void run_ms(int duration_ms)
     for (int t = 0; t < duration_ms; t += 2) {
         PitchCtrl.lastTime = PitchCtrl.nowTime;
         PitchCtrl.nowTime += 2;
+        YawCtrl.lastTime = YawCtrl.nowTime;
+        YawCtrl.nowTime += 2;
         unitPID_calc();
     }
 }
@@ -138,6 +149,14 @@ static void setup_friction(float error_rad)
     pitch_friction_up_out = 750;
     pitch_friction_down_out = 1000;
     PitchCtrl.want_AbsoluteAngleCtrl = error_rad;
+}
+
+/* 直接调用 Pitch 的补偿计算，用当前门槛和死区。 */
+static float pitch_fill(float pid_out)
+{
+    return calcFrictionFill(&PitchCtrl, &pitch_friction_state, pid_out,
+                            pitch_friction_up_out, pitch_friction_down_out,
+                            pitch_friction_error_rad);
 }
 
 static void friction_tests(void)
@@ -197,18 +216,17 @@ static void friction_tests(void)
     setup_friction(0.01f);
     run_ms(200);
     {
-        pitch_control_debug_t check = {0};
         PitchCtrl.agl_pid.error[0] = 0.01f;
         PitchCtrl.agl_pid.out = 0.0001f;
-        near_value(calcPitchFriction(600, &check), 150);
+        near_value(pitch_fill(600), 150);
         PitchCtrl.agl_pid.out = -0.0001f;
-        near_value(calcPitchFriction(600, &check), 0);
+        near_value(pitch_fill(600), 0);
         PitchCtrl.agl_pid.error[0] = -0.01f;
         PitchCtrl.agl_pid.out = -0.0001f;
-        near_value(calcPitchFriction(-600, &check), -400);
-        near_value(calcPitchFriction(200, &check), 0); /* 低头时 PID 在往上推（刹车）：不补 */
+        near_value(pitch_fill(-600), -400);
+        near_value(pitch_fill(200), 0); /* 低头时 PID 在往上推（刹车）：不补 */
         PitchCtrl.agl_pid.out = 0.0001f;
-        near_value(calcPitchFriction(-600, &check), 0);
+        near_value(pitch_fill(-600), 0);
     }
 
     /* 转起来立即退出补偿；再次停住要重新等满 100 ms。 */
@@ -256,7 +274,7 @@ static void friction_tests(void)
     near_value(integral_with[0], integral_with[1]);
 
     /* 门槛或死区填错（NaN、负数、超过上限）都按关闭处理。 */
-    const float bad_values[] = {NAN, INFINITY, -750, PITCH_FRICTION_MAX_OUT + 1};
+    const float bad_values[] = {NAN, INFINITY, -750, FRICTION_MAX_OUT + 1};
     for (int i = 0; i < 4; ++i) {
         setup_friction(0.01f);
         pitch_friction_up_out = bad_values[i];
@@ -265,9 +283,9 @@ static void friction_tests(void)
         near_value(pitch_control_debug.total_out, 600);
     }
     setup_friction(0.01f);
-    pitch_friction_up_out = PITCH_FRICTION_MAX_OUT;
+    pitch_friction_up_out = FRICTION_MAX_OUT;
     run_ms(200);
-    near_value(pitch_control_debug.total_out, PITCH_FRICTION_MAX_OUT);
+    near_value(pitch_control_debug.total_out, FRICTION_MAX_OUT);
     for (int i = 0; i < 3; ++i) {
         setup_friction(0.01f);
         pitch_friction_error_rad = bad_values[i];
@@ -294,6 +312,95 @@ static void friction_tests(void)
     assert(!pitch_control_debug.friction_active);
     run_ms(4);
     assert(pitch_control_debug.friction_active);
+}
+
+/* Yaw 摩擦补偿用例：Yaw 只有 P，误差 err 时 PID 输出 = 1e7 * 0.012 * err。
+ * Pitch 保持目标=实际，不产生补偿，只看 Yaw。 */
+static void setup_yaw_friction(float error_rad)
+{
+    setup_default();
+    yaw_friction_pos_out = 1500;
+    yaw_friction_neg_out = 2000;
+    YawCtrl.want_AbsoluteAngleCtrl = error_rad;
+}
+
+static void yaw_friction_tests(void)
+{
+    const float yaw_gain = YAW_SPD_KP * YAW_AGL_KP; /* 每 rad 误差对应的输出 */
+
+    /* 门槛为0时与原来的 Yaw 输出完全一致（由 setup_default 的基线用例覆盖），这里再看一次停住后。 */
+    setup_default();
+    YawCtrl.want_AbsoluteAngleCtrl = 0.01f;
+    run_ms(200);
+    assert(!yaw_friction_state.active);
+    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * 0.01f));
+
+    /* 正方向：停住满 100 ms 后补到门槛 1500；Pitch 的门槛不影响 Yaw。 */
+    setup_yaw_friction(0.01f);
+    pitch_friction_up_out = 4000;
+    run_ms(98);
+    assert(!yaw_friction_state.still && !yaw_friction_state.active);
+    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * 0.01f));
+    run_ms(4);
+    assert(yaw_friction_state.still && yaw_friction_state.active);
+    near_value(yaw_friction_state.out, 1500 - yaw_gain * 0.01f);
+    assert(YawCtrl.Volt_out == 1500);
+    assert(!pitch_control_debug.friction_active);
+
+    /* 负方向用自己的门槛 2000。 */
+    setup_yaw_friction(-0.01f);
+    run_ms(200);
+    assert(YawCtrl.Volt_out == -2000);
+
+    /* 死区内不补；PID 已超过门槛不补。 */
+    setup_yaw_friction(0.005f);
+    run_ms(200);
+    assert(yaw_friction_state.still && !yaw_friction_state.active);
+    setup_yaw_friction(0.02f);
+    run_ms(200);
+    assert(!yaw_friction_state.active);
+    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * 0.02f));
+
+    /* 电机相对底盘在转（例如小陀螺时底盘在下面转）：不算停住，不补。 */
+    setup_yaw_friction(0.01f);
+    test_yaw_rpm = 3;
+    run_ms(200);
+    assert(!yaw_friction_state.still && !yaw_friction_state.active);
+
+    /* 角度跨过 ±180°：差值按最短角度算，不会被误判为在动。 */
+    setup_yaw_friction(0);
+    YawCtrl.nowAbsoluteAngle = PI - 0.0005f;
+    YawCtrl.want_AbsoluteAngleCtrl = PI - 0.0005f - 0.01f;
+    run_ms(60);
+    YawCtrl.nowAbsoluteAngle = -PI + 0.0005f;
+    YawCtrl.want_AbsoluteAngleCtrl = -PI + 0.0005f - 0.01f;
+    run_ms(60);
+    assert(yaw_friction_state.still && yaw_friction_state.active);
+
+    /* 无力或遥控掉线：输出为0，恢复后要重新等满 100 ms。 */
+    for (int which = 0; which < 2; ++which) {
+        setup_yaw_friction(0.01f);
+        run_ms(200);
+        assert(yaw_friction_state.active);
+        if (which == 0) YawCtrl.nopowerflag = 1;
+        if (which == 1) rc_online = 0;
+        run_ms(2);
+        if (which == 0) assert(YawCtrl.Volt_out == 0);
+        assert(!yaw_friction_state.active);
+        YawCtrl.nopowerflag = 0;
+        rc_online = 1;
+        run_ms(98);
+        assert(!yaw_friction_state.active);
+        run_ms(4);
+        assert(yaw_friction_state.active);
+    }
+
+    /* Yaw 门槛填错按关闭处理。 */
+    setup_yaw_friction(0.01f);
+    yaw_friction_pos_out = NAN;
+    run_ms(200);
+    assert(!yaw_friction_state.active);
+    assert(YawCtrl.Volt_out == (int16_t)(yaw_gain * 0.01f));
 }
 
 /* 开火门控用例：自瞄、两轴误差为0、默认参数。 */
@@ -755,9 +862,10 @@ int main(void)
     pitch_i_separation_rad = PITCH_I_SEPARATION_RAD_DEFAULT;
 
     friction_tests();
+    yaw_friction_tests();
     fire_gate_tests();
 
-    puts("PASS: fire gate; static friction fill-to-threshold; compensation-off matches baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
+    puts("PASS: fire gate; Yaw static friction; static friction fill-to-threshold; compensation-off matches baseline; integral separation; Pitch integral and gravity feedforward; combined saturation/anti-windup; ramp/disable/debug; Yaw unchanged");
 }
 '''
 (out / 'test.c').write_text(prefix + declarations + functions + tests, encoding='utf-8')

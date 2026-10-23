@@ -110,26 +110,35 @@ python tools/fit_pitch_gravity.py -0.3,-1850 0,-2100 0.4,-1900
 2. 采样并拟合，只打开重力前馈，观察 Pitch 静差和自瞄效果。
 3. 如仍有静差，再单独打开 `Ki`，从小值开始；观察 `integral_separated` 和超调。
 
-## Pitch 静摩擦补偿（启动补足，默认关闭）
+## 静摩擦补偿（启动补足，Pitch 与 Yaw 共用）
 
-解决“停在离目标一段距离处，靠积分慢慢拉回”。只在下面几条**全部满足**时生效：
+解决“停在离目标一段距离处，靠积分慢慢拉回或一直卡住”。两个轴共用 `calcFrictionFill()`，
+各自有门槛、死区和状态。只在下面几条**全部满足**时生效：
 
-1. 已确认停住：Pitch 6020 反馈转速为 0，且角度离计时起点不超过 0.1°，连续满 100 ms。
+1. 已确认停住：该轴 6020 反馈转速为 0，且角度离计时起点不超过 0.1°，连续满 100 ms。
    转动或漂移超出就从当前时刻重新计时，所以一转起来补偿立刻退出；
-2. 离目标超过 `pitch_friction_error_rad`（默认 0.0087 rad ≈ 0.5°），目标附近不补，避免来回顶；
+2. 离目标超过死区（默认 0.0087 rad ≈ 0.5°），目标附近不补，避免来回顶；
 3. 位置环要的速度、速度环 PID 输出都指向目标；PID 在刹车（方向相反）不补；
-4. PID 输出（P+I+D，不含重力前馈）的大小还没到门槛。
+4. PID 输出（P+I+D，Pitch 不含重力前馈）的大小还没到门槛。
+
+转速是电机相对底盘的转速：小陀螺时底盘在 Yaw 下面转，Yaw 不会被判为停住，补偿不触发。
 
 补法是**补到门槛**，不是加门槛：PID 已有 600、门槛 750，只补 150；PID 已超过门槛就不补。
 补偿不写进积分，加在总输出上后仍执行原总输出限幅。门槛填 0、负数、非数或超过 5000 都按关闭处理。
 
 | 变量 | 作用 |
 | --- | --- |
-| `pitch_friction_up_out` | 抬头方向门槛（PID 内部方向为正），默认 0 = 关闭 |
-| `pitch_friction_down_out` | 低头方向门槛（填正数），默认 0 = 关闭 |
-| `pitch_friction_error_rad` | 死区，单位 rad |
+| `pitch_friction_up_out` | Pitch 抬头方向门槛（PID 内部方向为正），默认 750 |
+| `pitch_friction_down_out` | Pitch 低头方向门槛（填正数），默认 750 |
+| `pitch_friction_error_rad` | Pitch 死区，单位 rad |
+| `yaw_friction_pos_out` | Yaw 角度读数增大方向的门槛，默认 0 = 关闭，建议从 600 开始每次加 200 |
+| `yaw_friction_neg_out` | Yaw 角度读数减小方向的门槛（填正数），默认 0 = 关闭 |
+| `yaw_friction_error_rad` | Yaw 死区，单位 rad |
 
-观察：`pitch_control_debug.friction_out` 是本周期补的差额，`friction_still` 表示已确认停住，
+Yaw 观察：调试器里看 `yaw_friction_state` 的 `still`（已确认停住）、`active`（本周期生效）、
+`out`（补的差额）；VOFA 里“Yaw 最终电机控制量”已包含补偿。确认合适后写回 `YAW_FRICTION_*_DEFAULT`。
+
+Pitch 观察：`pitch_control_debug.friction_out` 是本周期补的差额，`friction_still` 表示已确认停住，
 `friction_active` 表示本周期补偿生效。串口 CSV 里这两个标志也有，差额可用
 `total_unclamped_out - pid_unclamped_out - gravity_out` 算出。确认合适后写回 `PITCH_FRICTION_*_DEFAULT`。
 
