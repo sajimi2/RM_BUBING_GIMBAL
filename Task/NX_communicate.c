@@ -21,11 +21,30 @@ INS_t *Raw_Quaternion;
 
 volatile uint8_t data_ready = 0;
 static volatile uint8_t input_source = NX_SOURCE_CAN;
+static volatile uint8_t can_frame_seen;
+static volatile uint32_t last_can_frame_ms;
 extern uint8_t fire_t;
 
 uint8_t NX_GetSource(void)
 {
     return input_source;
+}
+
+uint8_t NX_VisionOnline(void)
+{
+    uint8_t seen;
+    uint32_t age_ms;
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    seen = can_frame_seen;
+    age_ms = HAL_GetTick() - last_can_frame_ms;
+    __set_PRIMASK(key);
+    // 没收过帧或超过100 ms没更新，都不能报在线。
+    if (!seen)
+        return 0;
+    if (age_ms > 100U)
+        return 0;
+    return 1;
 }
 
 void NX_SelectSource(uint8_t source)
@@ -56,6 +75,12 @@ uint8_t NX_ReceiveFrame(const uint8_t payload[8], uint8_t source)
     /* 串口任务和 CAN 中断都能发布数据；短临界区保证来源与整帧一起更新。 */
     key = __get_PRIMASK();
     __disable_irq();
+    // 单独记录真实CAN接收，串口模拟不能把视觉在线标志点亮。
+    if (source == NX_SOURCE_CAN)
+    {
+        last_can_frame_ms = HAL_GetTick();
+        can_frame_seen = 1;
+    }
     if (source == input_source)
     {
         NX_data = frame;

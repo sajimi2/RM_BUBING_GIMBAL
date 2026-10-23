@@ -8,6 +8,7 @@ set(FIRMWARE_SOURCES
     Task/robot_total_mode.c
     Task/NX_communicate.c
     Task/Reset_task.c
+    Task/vofa_task.c
     Debug/usart6_debug.c
     Debug/tuning_protocol.c
     Debug/tuning_service.c

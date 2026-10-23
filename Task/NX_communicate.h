@@ -39,6 +39,8 @@ enum nx_input_source
 
 /* CAN 和调参串口共用同一份八字节视觉载荷。切换来源时丢弃未消费的旧帧。 */
 uint8_t NX_GetSource(void);
+/* 最近100 ms收到过CAN视觉帧，表示接收通信在线；不表示识别到目标。 */
+uint8_t NX_VisionOnline(void);
 void NX_SelectSource(uint8_t source);
 uint8_t NX_ReceiveFrame(const uint8_t payload[8], uint8_t source);
 uint8_t NX_TakeControlFrame(CAN_Send_to_MCU *frame, uint8_t *source);

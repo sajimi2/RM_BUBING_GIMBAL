@@ -33,7 +33,7 @@
 #include "shoot_task.h"
 #include "NX_communicate.h"
 #include "Reset_task.h"
-#include "tuning_uart.h"
+#include "vofa_task.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -64,6 +64,7 @@ osThreadId resetTaskHandle;
 
 /* USER CODE END Variables */
 osThreadId testHandle;
+osThreadId vofaTaskHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -71,6 +72,7 @@ void start_INS_task(void const * argument);
 /* USER CODE END FunctionPrototypes */
 
 void test_task(void const * argument);
+extern void vofa_task(void const * argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -138,6 +140,10 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(test, test_task, osPriorityNormal, 0, 512);
   testHandle = osThreadCreate(osThread(test), NULL);
 
+  /* definition and creation of vofaTask; registered in standard_robot.ioc */
+  osThreadDef(vofaTask, vofa_task, osPriorityNormal, 0, 512);
+  vofaTaskHandle = osThreadCreate(osThread(vofaTask), NULL);
+
   /* USER CODE BEGIN RTOS_THREADS */
   osThreadDef(led, led_RGB_flow_task, osPriorityNormal, 0, 512); 
   led_RGB_flow_handle = osThreadCreate(osThread(led), NULL);
@@ -175,12 +181,11 @@ __weak void test_task(void const * argument)
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN test_task */
-  tuning_uart_init();
   /* Infinite loop */
   for(;;)
   {
-    tuning_uart_poll();
-    osDelay(5);
+    // test任务保留CubeMX生成的USB初始化，串口调参交给独立vofa_task。
+    osDelay(1000);
   }
   /* USER CODE END test_task */
 }

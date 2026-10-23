@@ -53,7 +53,7 @@
 #define PITCH_AGL_KI 0
 #define PITCH_AGL_KD 0.01f
 
-#define YAW_AGL_KP 0.006f
+#define YAW_AGL_KP 0.012f
 #define YAW_AGL_KI 0.00f
 #define YAW_AGL_KD 0.00000f
 
@@ -578,8 +578,8 @@ void getControlAngles(void)
             PitchCtrl.want_AbsoluteAngleCtrl = PitchCtrl.nowAbsoluteAngle + delta_pitch;
 
             // Yaw轴自动控制
-            if (frame_source == NX_SOURCE_CAN)
-                YawCtrl.want_AbsoluteAngleCtrl = YawCtrl.nowAbsoluteAngle + delta_yaw;
+            // CAN和串口模拟共用同一绝对角度载荷，不累加旧目标。
+            YawCtrl.want_AbsoluteAngleCtrl = YawCtrl.nowAbsoluteAngle + delta_yaw;
         }
     } 
 	else
@@ -627,6 +627,15 @@ void gimbal_tuning_get_state(pitch_tuning_state_t *state)
     state->source = NX_GetSource();
     state->remote_online = rc_online;
     state->automatic = gimbal_tuning_is_enabled();
+    state->vision_online = NX_VisionOnline();
+
+    // 只复制Yaw的控制结果，不在调参任务中重新执行PID。
+    state->yaw.target_angle_rad = YawCtrl.want_AbsoluteAngleCtrl;
+    state->yaw.actual_angle_rad = YawCtrl.nowAbsoluteAngle;
+    // 控制内部使用rad/ms；上传前统一转换为rad/s。
+    state->yaw.target_speed_rad_s = YawCtrl.agl_pid.out * 1000.0f;
+    state->yaw.speed_rad_s = YawCtrl.radspeed * 1000.0f;
+    state->yaw.motor_cmd = YawCtrl.Volt_out;
     __set_PRIMASK(key);
 }
 
@@ -695,7 +704,7 @@ uint8_t gimbal_tuning_submit_vision(const uint8_t payload[8])
         return TUNING_NOT_ENABLED;
     if (NX_GetSource() != NX_SOURCE_UART)
         return TUNING_WRONG_SOURCE;
-    /* 模拟端只提供 Pitch 目标，不接受开火请求；Yaw 目标由原状态机保持。 */
+    /* 串口模拟可提供双轴绝对目标，但不接受开火请求。 */
     if (payload[0] != 1U || payload[5] != 0U || payload[6] != 0U || payload[7] != 0U)
         return TUNING_BAD_PARAMETER;
     pitch_raw = (int16_t)((uint16_t)payload[3] | ((uint16_t)payload[4] << 8));

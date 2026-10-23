@@ -19,7 +19,8 @@ enum command_id
     CMD_TARGET,
     CMD_STREAM,
     CMD_GRAVITY,
-    CMD_MARK
+    CMD_MARK,
+    CMD_YAW
 };
 
 typedef struct
@@ -40,7 +41,8 @@ static const tuning_command_t commands[] = {
     {"target", CMD_TARGET, 1},
     {"stream", CMD_STREAM, 1},
     {"gravity", CMD_GRAVITY, 1},
-    {"mark", CMD_MARK, 1}
+    {"mark", CMD_MARK, 1},
+    {"yaw", CMD_YAW, 1}
 };
 
 static uint16_t stream_period_ms = 20U;
@@ -62,7 +64,7 @@ static const tuning_command_t *find_command(const char *name)
     return NULL;
 }
 
-static uint8_t submit_pitch(float angle_rad)
+static uint8_t submit_angles(float pitch_rad, float yaw_rad)
 {
     pitch_tuning_limits_t limits;
     uint8_t payload[8] = {1, 0, 0, 0, 0, 0, 0, 0};
@@ -70,12 +72,17 @@ static uint8_t submit_pitch(float angle_rad)
     float decoded;
 
     gimbal_tuning_get_limits(&limits);
-    if (!isfinite(angle_rad))
+    if (!isfinite(pitch_rad) || !isfinite(yaw_rad))
         return TUNING_OUT_OF_RANGE;
-    if (angle_rad < limits.pitch_min_rad || angle_rad > limits.pitch_max_rad)
+    if (pitch_rad < limits.pitch_min_rad || pitch_rad > limits.pitch_max_rad)
         return TUNING_OUT_OF_RANGE;
+    // Yaw允许跨过整圈边界；传给原视觉协议前折回[-PI, PI]。
+    yaw_rad = remainderf(yaw_rad, 2.0f * 3.1415926f);
+    raw = (int16_t)(yaw_rad * 32767.0f / 3.1415926f);
+    payload[1] = (uint8_t)raw;
+    payload[2] = (uint8_t)((uint16_t)raw >> 8);
     // 继续复用视觉八字节载荷和 Pitch 符号，向零取整避免量化越界。
-    raw = (int16_t)(-angle_rad * 32767.0f / 3.1415926f);
+    raw = (int16_t)(-pitch_rad * 32767.0f / 3.1415926f);
     decoded = -(float)raw * 3.1415926f / 32767.0f;
     if (decoded < limits.pitch_min_rad || decoded > limits.pitch_max_rad)
     {
@@ -87,6 +94,14 @@ static uint8_t submit_pitch(float angle_rad)
     payload[3] = (uint8_t)raw;
     payload[4] = (uint8_t)((uint16_t)raw >> 8);
     return gimbal_tuning_submit_vision(payload);
+}
+
+static uint8_t submit_pitch(float angle_rad)
+{
+    pitch_tuning_state_t state;
+    gimbal_tuning_get_state(&state);
+    // 单独修改Pitch时，载荷中的Yaw仍保持原目标。
+    return submit_angles(angle_rad, state.yaw.target_angle_rad);
 }
 
 static uint8_t select_source(float value, const pitch_tuning_state_t *state)
@@ -151,8 +166,13 @@ static uint8_t execute_command(uint8_t id, const float *values)
         return select_source(value, &state);
     case CMD_TARGET:
         return submit_pitch(value * DEG_TO_RAD);
+    case CMD_YAW:
+        if (value < -180.0f || value > 180.0f)
+            return TUNING_OUT_OF_RANGE;
+        // 单独修改Yaw时保持Pitch目标，避免把它重置到零。
+        return submit_angles(state.control.target_angle_rad, value * DEG_TO_RAD);
     case CMD_STREAM:
-        // 115200 下 168 字节/帧，20 ms 周期约占 73% 带宽，禁止更快。
+        // 八通道共36字节，115200、8N1下20 ms周期约占16%带宽。
         if (value != truncf(value))
             return TUNING_BAD_PARAMETER;
         if (value != 0.0f && (value < 20.0f || value > 2000.0f))
@@ -197,7 +217,7 @@ void tuning_service_request(const tuning_message_t *request)
     last_status = request->status;
     if (command != NULL)
         last_command = command->id;
-    // 格式错误的整行不执行，仍在下一帧报告错误码。
+    // 格式错误的整行不执行，不把残余内容当作新命令。
     if (last_status != TUNING_OK)
         return;
     if (command == NULL)
@@ -216,62 +236,27 @@ void tuning_service_request(const tuning_message_t *request)
 uint16_t tuning_service_frame(uint8_t output[TUNING_FRAME_SIZE])
 {
     pitch_tuning_state_t state;
-    pitch_tuning_limits_t limits;
     const pitch_control_debug_t *control = &state.control;
+    const yaw_control_debug_t *yaw = &state.yaw;
     float channels[TUNING_CHANNEL_COUNT];
     uint16_t i;
 
     gimbal_tuning_get_state(&state);
-    gimbal_tuning_get_limits(&limits);
-    channels[0] = control->target_angle_rad * RAD_TO_DEG;
-    channels[1] = control->actual_angle_rad * RAD_TO_DEG;
-    channels[2] = control->angle_error_rad * RAD_TO_DEG;
-    channels[3] = control->requested_angle_rad * RAD_TO_DEG;
-    channels[4] = control->speed_rad_s;
-    channels[5] = control->p_out;
-    channels[6] = control->i_out;
-    channels[7] = control->d_out;
-    channels[8] = control->pid_unclamped_out;
-    channels[9] = control->gravity_target_out;
-    channels[10] = control->gravity_out;
-    channels[11] = control->friction_out;
-    channels[12] = control->total_unclamped_out;
-    channels[13] = control->total_out;
-    channels[14] = (float)control->motor_cmd;
-    channels[15] = state.gravity.gain;
-    channels[16] = state.gravity.offset_rad * RAD_TO_DEG;
-    channels[17] = state.speed_ki;
-    channels[18] = (float)state.source;
-    channels[19] = (float)state.remote_online;
-    channels[20] = (float)state.automatic;
-    channels[21] = (float)control->control_enabled;
-    channels[22] = (float)control->target_limited;
-    channels[23] = (float)control->integral_limited;
-    channels[24] = (float)control->pid_saturated;
-    channels[25] = (float)control->total_saturated;
-    channels[26] = (float)control->integral_blocked;
-    channels[27] = (float)control->integral_separated;
-    channels[28] = (float)control->gravity_limited;
-    channels[29] = (float)control->gravity_config_invalid;
-    channels[30] = (float)control->friction_still;
-    channels[31] = (float)control->friction_active;
-    channels[32] = (float)state.tick_ms * 0.001f;
-    channels[33] = (float)last_command;
-    channels[34] = (float)last_status;
-    channels[35] = (float)command_count;
-    channels[36] = (float)stream_period_ms;
-    channels[37] = (float)record_mark;
-    channels[38] = limits.pitch_min_rad * RAD_TO_DEG;
-    channels[39] = limits.pitch_max_rad * RAD_TO_DEG;
-    channels[40] = 1.0f;
+    channels[0] = control->actual_angle_rad * RAD_TO_DEG;
+    channels[1] = control->target_angle_rad * RAD_TO_DEG;
+    channels[2] = yaw->actual_angle_rad * RAD_TO_DEG;
+    channels[3] = yaw->target_angle_rad * RAD_TO_DEG;
+    channels[4] = (float)yaw->motor_cmd;
+    channels[5] = (float)state.vision_online;
+    channels[6] = yaw->target_speed_rad_s * RAD_TO_DEG;
+    channels[7] = yaw->speed_rad_s * RAD_TO_DEG;
 
-    // Inf 会被误认作帧尾；非有限值改为零，并标记整帧无效。
-    for (i = 0; i < TUNING_CHANNEL_COUNT - 1U; ++i)
+    // Inf会被误认作帧尾；仅过滤上传值，不改变控制数据。
+    for (i = 0; i < TUNING_CHANNEL_COUNT; ++i)
     {
         if (!isfinite(channels[i]))
         {
             channels[i] = 0.0f;
-            channels[40] = 0.0f;
         }
     }
     return tuning_encode(channels, output);

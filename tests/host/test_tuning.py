@@ -49,7 +49,9 @@ static uint32_t irq_key;
 static uint32_t __get_PRIMASK(void) { return irq_key; }
 static void __disable_irq(void) { irq_key = 1; }
 static void __set_PRIMASK(uint32_t key) { irq_key = key; }
-static uint32_t xTaskGetTickCount(void) { return 1234; }
+static uint32_t now_ms = 1234;
+static uint32_t HAL_GetTick(void) { return now_ms; }
+static uint32_t xTaskGetTickCount(void) { return now_ms; }
 static uint8_t auto_mode;
 static uint8_t robotIsAuto(void) { return auto_mode; }
 volatile uint8_t rc_online = 1;
@@ -62,10 +64,12 @@ float delta_pitch, delta_yaw;
 CAN_Send_to_MCU NX_data;
 volatile uint8_t data_ready;
 static volatile uint8_t input_source = NX_SOURCE_CAN;
+static volatile uint8_t can_frame_seen;
+static volatile uint32_t last_can_frame_ms;
 uint8_t fire_t;
 '''
     funcs = '\n'.join(function(nx, name) for name in (
-        'NX_GetSource', 'NX_SelectSource', 'NX_ReceiveFrame', 'NX_TakeControlFrame'))
+        'NX_GetSource', 'NX_VisionOnline', 'NX_SelectSource', 'NX_ReceiveFrame', 'NX_TakeControlFrame'))
     funcs += '\n' + '\n'.join(function(source, name) for name in (
         'recordFireFrame', 'getControlAngles', 'gimbal_tuning_is_enabled', 'gimbal_tuning_get_state',
         'gimbal_tuning_get_limits', 'gimbal_tuning_set_gravity', 'gimbal_tuning_set_parameters',
@@ -96,9 +100,9 @@ static unsigned send_bytes(const char *text, size_t length)
 static void command(const char *text, unsigned expected)
 {
     assert(send_bytes(text, strlen(text)) == 1);
-    if (channels[34] != expected)
-        fprintf(stderr, "%s expected status %u, got %g\n", text, expected, channels[34]);
-    assert(channels[34] == expected);
+    if (last_status != expected)
+        fprintf(stderr, "%s expected status %u, got %g\n", text, expected, (double)last_status);
+    assert(last_status == expected);
 }
 static void near_value(float actual, float expected)
 {
@@ -112,15 +116,14 @@ int main(int argc, char **argv)
     memset(&PitchCtrl, 0, sizeof(PitchCtrl));
     memset(&YawCtrl, 0, sizeof(YawCtrl));
     snapshot();
-    assert(channels[36] == 20 && channels[40] == 1);
-    near_value(channels[38], PITCH_MIN_ANGLE * 180 / PI);
-    near_value(channels[32], 1.234f);
+    assert(TUNING_CHANNEL_COUNT == 8 && TUNING_FRAME_SIZE == 36);
+    assert(tuning_service_period_ms() == 20 && channels[5] == 0);
     command("parameters:2500,66,6000\n", TUNING_OK);
-    assert(channels[15] == 2500 && channels[17] == 6000);
-    near_value(channels[16], 66);
+    assert(pitch_gravity_config.gain == 2500 && PitchCtrl.spd_pid.Ki == 6000);
+    near_value((pitch_gravity_config.offset_rad * 180 / PI), 66);
     command("parameters:1000,30,-1\n", TUNING_OUT_OF_RANGE);
-    assert(channels[15] == 2500 && channels[17] == 6000);
-    near_value(channels[16], 66);
+    assert(pitch_gravity_config.gain == 2500 && PitchCtrl.spd_pid.Ki == 6000);
+    near_value((pitch_gravity_config.offset_rad * 180 / PI), 66);
     PitchCtrl.spd_pid.Iout = 100;
     command("ki:4000\n", TUNING_OK);
     assert(PitchCtrl.spd_pid.Iout == 100);
@@ -130,17 +133,17 @@ int main(int argc, char **argv)
     command("offset:181\n", TUNING_OUT_OF_RANGE);
     command("gain:5001\n", TUNING_OUT_OF_RANGE);
     command("gravity:0\n", TUNING_OK);
-    assert(channels[15] == 0);
+    assert(pitch_gravity_config.gain == 0);
     command("gravity:0\n", TUNING_OK);
     command("gravity:1\n", TUNING_OK);
-    assert(channels[15] == 2500);
+    assert(pitch_gravity_config.gain == 2500);
     command("gravity:1\n", TUNING_BAD_PARAMETER);
     command("gravity:0\n", TUNING_OK);
     command("gain:1200\n", TUNING_OK);
     command("gravity:1\n", TUNING_BAD_PARAMETER);
     command("parameters:2500,66,6000\n", TUNING_OK);
     command("source:1\n", TUNING_NOT_ENABLED);
-    assert(channels[18] == 0);
+    assert(NX_GetSource() == 0);
     rc.rc.s[1] = 2;
     rc_online = 0;
     command("source:1\n", TUNING_NOT_ENABLED);
@@ -160,6 +163,27 @@ int main(int argc, char **argv)
     near_value(PitchCtrl.want_AbsoluteAngleCtrl, 5 * PI / 180);
     near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.3f);
     assert(NX_data.fire == 0);
+    /* 连续Yaw绝对目标不累加误差，也不能改变已保持的Pitch目标。 */
+    pitch_control_debug.target_angle_rad = PitchCtrl.want_AbsoluteAngleCtrl;
+    for (unsigned sample = 0; sample < 48; ++sample) {
+        float yaw_deg = 20 + 3 * sinf(2 * PI * 0.5f * sample / 24);
+        char yaw_command[50];
+        snprintf(yaw_command, sizeof(yaw_command), "yaw:%.5f\n", (double)yaw_deg);
+        command(yaw_command, TUNING_OK);
+        getControlAngles();
+        near_value(YawCtrl.want_AbsoluteAngleCtrl, yaw_deg * PI / 180);
+        near_value(PitchCtrl.want_AbsoluteAngleCtrl, 5 * PI / 180);
+        assert(NX_data.fire == 0 && NX_data.rev == 0);
+    }
+    command("yaw:181\n", TUNING_OUT_OF_RANGE);
+    command("yaw:-181\n", TUNING_OUT_OF_RANGE);
+    command("yaw:179\n", TUNING_OK);
+    getControlAngles();
+    near_value(YawCtrl.want_AbsoluteAngleCtrl, 179 * PI / 180);
+    command("yaw:-179\n", TUNING_OK);
+    getControlAngles();
+    near_value(YawCtrl.want_AbsoluteAngleCtrl, -179 * PI / 180);
+    YawCtrl.want_AbsoluteAngleCtrl = 0.3f;
     command("source:1\n", TUNING_OK);
     getControlAngles();
     near_value(PitchCtrl.want_AbsoluteAngleCtrl, 5 * PI / 180);
@@ -174,8 +198,10 @@ int main(int argc, char **argv)
     getControlAngles();
     assert(NX_GetSource() == NX_SOURCE_CAN);
     command("target:0\n", TUNING_NOT_ENABLED);
+    command("yaw:0\n", TUNING_NOT_ENABLED);
     rc.rc.s[1] = 2;
     command("target:0\n", TUNING_WRONG_SOURCE);
+    command("yaw:0\n", TUNING_WRONG_SOURCE);
     command("source:0\n", TUNING_OK);
     /* 保留新门控的集成检查：CAN 的 fire/距离与本帧角度一起记录。 */
     const uint8_t can_payload[8] = {1, 0, 0, 0, 0, 1, 0xe8, 0x03};
@@ -195,11 +221,13 @@ int main(int argc, char **argv)
     assert(tuning_service_period_ms() == 0);
     command("read:0\n", TUNING_OK);
     command("stream:19\n", TUNING_OUT_OF_RANGE);
+    command("stream:20\n", TUNING_OK);
+    command("stream:24\n", TUNING_OK);
     command("stream:20.5\n", TUNING_BAD_PARAMETER);
     command("stream:2001\n", TUNING_OUT_OF_RANGE);
-    command("stream:20\n", TUNING_OK);
+    command("stream:25\n", TUNING_OK);
     command("mark:42\n", TUNING_OK);
-    assert(channels[37] == 42);
+    assert(record_mark == 42);
     command("mark:-1\n", TUNING_OUT_OF_RANGE);
     command("unknown:1\n", TUNING_BAD_COMMAND);
     command("gain:12junk\n", TUNING_BAD_LENGTH);
@@ -213,43 +241,92 @@ int main(int argc, char **argv)
     command("gain:\n", TUNING_BAD_LENGTH);
     command("gain: +1200.0 \r\n", TUNING_OK);
     assert(send_bytes("\n\r\n", 3) == 0);
-    assert(channels[15] == 1200);
+    assert(pitch_gravity_config.gain == 1200);
     assert(send_bytes("gain:10", 7) == 0);
     assert(send_bytes("00\n", 3) == 1);
-    assert(channels[15] == 1000);
+    assert(pitch_gravity_config.gain == 1000);
     tuning_parser_discard(&parser);
     command("gain:5000\n", TUNING_BAD_LENGTH);
-    assert(channels[15] == 1000);
+    assert(pitch_gravity_config.gain == 1000);
     const char invalid[] = {'g','a','i','n',':','1',0,'0','\n'};
-    assert(send_bytes(invalid, sizeof(invalid)) == 1 && channels[34] == TUNING_BAD_LENGTH);
+    assert(send_bytes(invalid, sizeof(invalid)) == 1 && last_status == TUNING_BAD_LENGTH);
     char overflow[150];
     memset(overflow, 'x', sizeof(overflow));
     memcpy(overflow + 130, "gain:5000\n", 10);
-    assert(send_bytes(overflow, 140) == 1 && channels[34] == TUNING_BAD_LENGTH);
-    assert(channels[15] == 1000);
+    assert(send_bytes(overflow, 140) == 1 && last_status == TUNING_BAD_LENGTH);
+    assert(pitch_gravity_config.gain == 1000);
     command("read:0\n", TUNING_OK);
     assert(irq_key == 0);
-    pitch_control_debug.friction_out = 123;
+    /* 八通道顺序、单位和最终输出；读取不会改写双环状态。 */
+    pitch_control_debug.actual_angle_rad = -0.25f;
+    pitch_control_debug.target_angle_rad = 0.5f;
+    YawCtrl.nowAbsoluteAngle = -179 * PI / 180;
+    YawCtrl.want_AbsoluteAngleCtrl = 179 * PI / 180;
+    YawCtrl.agl_pid.out = 0.0005f;
+    YawCtrl.radspeed = -0.00025f;
+    YawCtrl.spd_pid.Pout = 31000;
+    YawCtrl.Volt_out = 20000;
+    struct GimbalMotorCtrl_s yaw_before = YawCtrl;
+    struct GimbalMotorCtrl_s pitch_before = PitchCtrl;
     snapshot();
-    assert(channels[11] == 123);
-    pitch_control_debug.d_out = INFINITY;
+    near_value(channels[0], -0.25f * 180 / PI);
+    near_value(channels[1], 0.5f * 180 / PI);
+    near_value(channels[2], -179);
+    near_value(channels[3], 179);
+    assert(channels[4] == 20000 && channels[5] == 1);
+    near_value(channels[6], 0.5f * 180 / PI);
+    near_value(channels[7], -0.25f * 180 / PI);
+    assert(memcmp(&YawCtrl, &yaw_before, sizeof(YawCtrl)) == 0);
+    assert(memcmp(&PitchCtrl, &pitch_before, sizeof(PitchCtrl)) == 0);
+    YawCtrl.Volt_out = 0;
     snapshot();
-    assert(channels[7] == 0 && channels[40] == 0);
-    pitch_control_debug.d_out = 17;
-    command("read:0\n", TUNING_OK);
-    assert(channels[40] == 1);
+    assert(channels[4] == 0);
+    pitch_control_debug.actual_angle_rad = INFINITY;
+    snapshot();
+    assert(channels[0] == 0);
+    pitch_control_debug.actual_angle_rad = -0.25f;
+    YawCtrl.radspeed = INFINITY;
+    snapshot();
+    assert(channels[7] == 0);
+    YawCtrl.radspeed = -0.00025f;
+    /* CAN超时不依赖自瞄模式，串口模拟也不能刷新CAN在线状态。 */
+    now_ms = 1334;
+    snapshot();
+    assert(channels[5] == 1);
+    now_ms = 1335;
+    snapshot();
+    assert(channels[5] == 0);
+    NX_SelectSource(NX_SOURCE_UART);
+    assert(NX_ReceiveFrame(can_payload, NX_SOURCE_UART));
+    snapshot();
+    assert(channels[5] == 0);
+    assert(!NX_ReceiveFrame(can_payload, NX_SOURCE_CAN));
+    snapshot();
+    assert(channels[5] == 1); /* 即便未选CAN控制，仍能检测真实CAN收包。 */
+    NX_SelectSource(NX_SOURCE_CAN);
+    now_ms = UINT32_MAX - 20U;
+    assert(NX_ReceiveFrame(can_payload, NX_SOURCE_CAN));
+    now_ms = 79;
+    snapshot();
+    assert(channels[5] == 1);
+    now_ms = 80;
+    snapshot();
+    assert(channels[5] == 0);
+    assert(NX_ReceiveFrame(can_payload, NX_SOURCE_CAN));
+    snapshot();
+    assert(channels[5] == 1 && irq_key == 0);
     if (argc > 1) {
 #ifdef _WIN32
         _setmode(_fileno(stdout), _O_BINARY);
 #endif
         assert(fwrite(frame, 1, sizeof(frame), stdout) == sizeof(frame));
     } else {
-        puts("PASS: VOFA codec/service + actual control gates/atomic parameters/Ki/gravity/source/targets/nonfinite handling");
+        puts("PASS: VOFA codec/service + control gates/parameters/Pitch targets/eight-channel mapping/Yaw speed units/read-only output/CAN timeout/wraparound/nonfinite handling");
     }
     return 0;
 }
 '''
-    (OUT / 'test.c').write_text(prefix + declarations + funcs + tests, encoding='utf-8')
+    (OUT / 'test.c').write_text(prefix + declarations + funcs + '\n#include "tuning_service.c"\n' + tests, encoding='utf-8')
     executable = OUT / ('test_tuning.exe' if os.name == 'nt' else 'test_tuning')
     cc = os.environ.get('HOST_CC') or shutil.which('gcc')
     assert cc, 'Host GCC required'
@@ -257,13 +334,17 @@ int main(int argc, char **argv)
                     '-I', str(OUT), '-I', str(ROOT / 'Control'), '-I', str(ROOT / 'Task'),
                     '-I', str(ROOT / 'Applications'), '-I', str(ROOT / 'Debug'),
                     str(OUT / 'test.c'), str(ROOT / 'Debug/tuning_protocol.c'),
-                    str(ROOT / 'Debug/tuning_service.c'), '-lm', '-o', str(executable)], check=True)
+                    '-lm', '-o', str(executable)], check=True)
     subprocess.run([str(executable)], check=True)
     frame = subprocess.check_output([str(executable), 'frame'])
-    assert len(frame) == 168 and frame[-4:] == b'\x00\x00\x80\x7f'
-    values = struct.unpack('<41f', frame[:-4])
-    assert values[7] == 17 and values[15] == 1000 and values[37] == 42
-    print('PASS: independently decoded 41-channel little-endian JustFloat frame')
+    assert len(frame) == 36 and frame[-4:] == b'\x00\x00\x80\x7f'
+    values = struct.unpack('<8f', frame[:-4])
+    assert abs(values[0] + 0.25 * 180 / 3.1415926) < 0.0002
+    assert abs(values[3] - 179) < 0.0002 and values[4] == 0 and values[5] == 1
+    assert abs(values[6] - 0.5 * 180 / 3.1415926) < 0.0002
+    assert abs(values[7] + 0.25 * 180 / 3.1415926) < 0.0002
+    print('PASS: independently decoded eight-channel little-endian JustFloat frame')
+
 
 
 if __name__ == '__main__':

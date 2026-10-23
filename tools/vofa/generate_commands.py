@@ -7,6 +7,7 @@ COMMANDS = [
     ('重力 Offset（度）', 'offset:%f\n'),
     ('Pitch 速度环 Ki', 'ki:%f\n'),
     ('模拟 Pitch 目标（度）', 'target:%f\n'),
+    ('模拟 Yaw 目标（度）', 'yaw:%f\n'),
     ('进入串口模拟并保持当前角度', 'source:1\n'),
     ('恢复 CAN 视觉', 'source:0\n'),
     ('读取当前状态', 'read:0\n'),
@@ -14,7 +15,6 @@ COMMANDS = [
     ('恢复关闭前重力参数', 'gravity:1\n'),
     ('上传周期 20 ms', 'stream:20\n'),
     ('暂停周期上传', 'stream:0\n'),
-    ('记录组号', 'mark:%d\n'),
     ('关闭积分并清零 I 项', 'ki:0\n'),
 ]
 

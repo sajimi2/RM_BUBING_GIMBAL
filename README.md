@@ -1,6 +1,10 @@
 # BubinGimbalV1.0
 
-当前调参工具为 **VOFA+ 直接连接 DAP 串口**，无需网页后台。上行采用 JustFloat，下行由 VOFA+ 数值控件和按钮发送文本命令；支持 Gain、Offset、Ki、模拟 Pitch 目标与状态曲线。配置方法见 [VOFA_TUNING.md](VOFA_TUNING.md)。原网页及其二进制协议资料保留供历史查阅，不再连接当前固件。
+当前调参工具为 **VOFA+ 直接连接 DAP 串口**，无需网页后台。JustFloat只上传8个通道：Pitch实际/目标角、Yaw实际/目标角、Yaw最终PID输出、视觉CAN接收在线标志，以及Yaw目标/实际速度（°/s）；默认20 ms上传，VOFA的Δt设为20 ms。原有Gain、Offset、Ki和Pitch目标下行命令保留。配置方法见 [VOFA_TUNING.md](VOFA_TUNING.md)。原网页及其二进制协议资料保留供历史查阅，不再连接当前固件。
+
+VOFA串口收发由独立的`Task/vofa_task.c`任务处理，CubeMX的ioc中登记为`vofaTask`。云台、IMU、发射等原有任务手动创建于`Src/freertos.c`的用户代码区，因此不在CubeMX任务表中显示。具体说明见[任务说明](VOFA_TUNING.md#在cubemx里看任务)。
+
+新增[Yaw自动摆动控件与CSV截取窗口](tools/vofa/VOFA_YAW_SWEEP.md)：按钮启动约24 Hz的Yaw目标发送，默认±3°、0.5 Hz、10秒；CSV可拖选区间另存，原文件保留。上行仍为8个通道。
 
 当前阶段为双环 PID + 重力补偿，默认 Ki=6000、Gain=2500、Offset=1.16 rad。串口上车对照记录、检查范围和后续真实视觉测试顺序见 [2026-10-21 阶段存档](docs/checkpoints/2026-10-21-pitch-pid-gravity.md)。Pitch 静摩擦补偿（启动补足）的代码已加入，默认关闭，见下文“Pitch 静摩擦补偿”。
 

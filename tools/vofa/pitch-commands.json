@@ -66,6 +66,19 @@
         "subCmds": []
       },
       {
+        "name": "模拟 Yaw 目标（度）",
+        "intro_on": true,
+        "intro": "",
+        "hex_on": false,
+        "loop_on": false,
+        "loop_ms": 100,
+        "loop_count": 1,
+        "cmd_hex": "79 61 77 3A 25 66 0A",
+        "is_group": false,
+        "down": false,
+        "subCmds": []
+      },
+      {
         "name": "进入串口模拟并保持当前角度",
         "intro_on": true,
         "intro": "",
@@ -152,19 +165,6 @@
         "loop_ms": 100,
         "loop_count": 1,
         "cmd_hex": "73 74 72 65 61 6D 3A 30 0A",
-        "is_group": false,
-        "down": false,
-        "subCmds": []
-      },
-      {
-        "name": "记录组号",
-        "intro_on": true,
-        "intro": "",
-        "hex_on": false,
-        "loop_on": false,
-        "loop_ms": 100,
-        "loop_count": 1,
-        "cmd_hex": "6D 61 72 6B 3A 25 64 0A",
         "is_group": false,
         "down": false,
         "subCmds": []

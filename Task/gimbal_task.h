@@ -94,16 +94,28 @@ extern volatile fire_gate_debug_t fire_gate_debug;
 /* 发射任务查询本周期是否允许开火：视觉允许、帧未过期、两轴已对准并保持。 */
 uint8_t gimbal_fire_allowed(void);
 
-/* 调参任务读取一致的快照；不会把调试结构体作为控制输入。 */
+/* Yaw最近一次控制结果，仅供观察，不参与控制计算。 */
+typedef struct
+{
+    fp32 target_angle_rad;
+    fp32 actual_angle_rad;
+    fp32 target_speed_rad_s; // 位置环限幅后的速度要求，rad/s
+    fp32 speed_rad_s;        // INS角度差分速度，rad/s
+    int16_t motor_cmd;       // 实际交给CAN发送的Yaw电机指令
+} yaw_control_debug_t;
+
+/* 调参任务读取一致的双轴快照；保留原类型名，不作为控制输入。 */
 typedef struct
 {
     uint32_t tick_ms;
     pitch_gravity_config_t gravity;
     pitch_control_debug_t control;
+    yaw_control_debug_t yaw;
     fp32 speed_ki;
     uint8_t source;
     uint8_t remote_online;
     uint8_t automatic;
+    uint8_t vision_online;
 } pitch_tuning_state_t;
 
 typedef struct
