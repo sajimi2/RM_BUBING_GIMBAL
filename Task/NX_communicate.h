@@ -9,8 +9,8 @@ typedef struct __attribute__((packed))
     uint8_t mode;    // 0: 不控制, 1: 控制云台但不开火，2: 控制云台且开火
     int16_t yaw;
     int16_t pitch;
-	uint8_t fire;
-	int16_t rev;
+	uint8_t fire;    // 1: 视觉允许开火，电控还要确认云台已对准才真正开火
+	int16_t rev;     // 按无符号数使用：bit0 = 1 只瞄准不发射；bit1~15 = 目标距离（cm），0表示没给
 } CAN_Send_to_MCU;
 
 // MCU -> 上位机

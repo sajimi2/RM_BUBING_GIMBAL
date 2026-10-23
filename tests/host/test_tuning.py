@@ -67,7 +67,7 @@ uint8_t fire_t;
     funcs = '\n'.join(function(nx, name) for name in (
         'NX_GetSource', 'NX_SelectSource', 'NX_ReceiveFrame', 'NX_TakeControlFrame'))
     funcs += '\n' + '\n'.join(function(source, name) for name in (
-        'getControlAngles', 'gimbal_tuning_is_enabled', 'gimbal_tuning_get_state',
+        'recordFireFrame', 'getControlAngles', 'gimbal_tuning_is_enabled', 'gimbal_tuning_get_state',
         'gimbal_tuning_get_limits', 'gimbal_tuning_set_gravity', 'gimbal_tuning_set_parameters',
         'gimbal_tuning_set_source', 'gimbal_tuning_submit_vision'))
     tests = r'''
@@ -176,6 +176,19 @@ int main(int argc, char **argv)
     command("target:0\n", TUNING_NOT_ENABLED);
     rc.rc.s[1] = 2;
     command("target:0\n", TUNING_WRONG_SOURCE);
+    command("source:0\n", TUNING_OK);
+    /* 保留新门控的集成检查：CAN 的 fire/距离与本帧角度一起记录。 */
+    const uint8_t can_payload[8] = {1, 0, 0, 0, 0, 1, 0xe8, 0x03};
+    assert(NX_ReceiveFrame(can_payload, NX_SOURCE_CAN));
+    getControlAngles();
+    assert(fire_frame_valid && fire_frame_source == NX_SOURCE_CAN);
+    assert(fire_frame_fire == 1 && fire_frame_rev == 1000);
+    assert(fire_frame_time == PitchCtrl.nowTime);
+    /* VOFA 串口模拟仍只瞄准，不能把上一帧 CAN 的开火标志带入。 */
+    command("source:1\n", TUNING_OK);
+    getControlAngles();
+    assert(fire_frame_source == NX_SOURCE_UART);
+    assert(fire_frame_fire == 0 && fire_frame_rev == 0);
     command("source:0\n", TUNING_OK);
     command("source:0.5\n", TUNING_BAD_PARAMETER);
     command("stream:0\n", TUNING_OK);
