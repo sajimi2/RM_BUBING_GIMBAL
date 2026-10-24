@@ -1,0 +1,26 @@
+{
+  "source": "C:\\Users\\21775\\Desktop\\vofa+最新真实自瞄测试_24247-26386.csv",
+  "source_sha256": "84503d32b09f35173cff562ca489f0e9b35cfa92d7bd9717209b875aadf95c99",
+  "source_rows": 2140,
+  "pitch_target_column": "Pitch 目标角",
+  "yaw_target_column": "Yaw 目标角(°)",
+  "estimated_sample_ms": 20,
+  "cross_estimated_period": {
+    "estimated_ms": 20.710689144855266,
+    "pairs": 1613
+  },
+  "training_data_rows": [
+    66,
+    1400
+  ],
+  "holdout_data_rows": [
+    1451,
+    2033
+  ],
+  "baseline_label": "本次实测：Yaw Kp=0.018，速度前馈0.66，输出前馈0，插值关闭；周期估计20ms",
+  "limits": [
+    "无收帧时间戳，20ms为估计；不是原始CAN逐帧重放。",
+    "只保存两轴目标；没有学习实际角、电机输出、开火或机械反冲。",
+    "Pitch限位是准备数据时的保守预检范围；固件仍做最终检查。"
+  ]
+}

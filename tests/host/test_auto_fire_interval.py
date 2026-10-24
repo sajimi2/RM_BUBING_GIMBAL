@@ -10,7 +10,7 @@ OUT = ROOT / 'build/host-auto-fire-interval'
 
 
 def function(source, name):
-    match = re.search(r'^(?:static void|void static|void) ' + name + r'\([^;]*?\)\s*\{', source, re.M)
+    match = re.search(r'^(?:static void|void static|void|uint8_t) ' + name + r'\([^;]*?\)\s*\{', source, re.M)
     assert match, name
     end, depth = match.end(), 1
     while depth:
@@ -43,12 +43,13 @@ static struct { struct { int s[2], ch[5]; } rc;
 static struct { int rev; } nx_data, *nx_p = &nx_data;
 static int trigger_state, wheel, fricOn, triggerOn;
 static uint8_t fire_t;
+static volatile uint8_t rc_online = 1;
 static float wantedVShootMotor[2], wantedVTriggerMotor;
 '''
     globals_ = '\nstatic enum TriggerMode_e triggerMode;\n'
     funcs = '\n'.join(function(source, name) for name in (
         'getInstruction', 'fricModeChange', 'tryStartAutoShot',
-        'triggerModeChange', 'initShootModes', 'setSpeed'))
+        'triggerModeChange', 'initShootModes', 'setSpeed', 'shoot_is_feeding_forward'))
     tests = r'''
 static void step(TickType_t now)
 {
@@ -61,6 +62,7 @@ static void step(TickType_t now)
 static void reset(void)
 {
     initShootModes();
+    rc_online = 1;
     automatic = gate = source = 0;
     rc_data.mouse.press_l = rc_data.mouse.press_r = 0;
     rc_data.rc.ch[4] = 0;
@@ -79,10 +81,16 @@ int main(void)
     fire_t = 1;
     step(0);
     assert(triggerOn && autoFireHasStarted && autoFireLastStartTime == 0);
+    assert(shoot_is_feeding_forward() == 1);
+    rc_online = 0;
+    assert(shoot_is_feeding_forward() == 0);
+    assert(triggerOn && wantedVTriggerMotor > 0); /* 读取标志不修改控制状态。 */
+    rc_online = 1;
     step(40);
     assert(triggerOn && shootOneStartTime == 0);
     step(45);
     assert(!triggerOn); /* 41 ms持续时间保留，5 ms轮询在45 ms停止 */
+    assert(shoot_is_feeding_forward() == 0);
     for (unsigned now = 50; now < interval; now += 5) {
         fire_t = 1;
         step(now);
@@ -114,6 +122,7 @@ int main(void)
     nx_data.rev = 1;
     step(50);
     assert(!fricOn && !triggerOn);
+    assert(shoot_is_feeding_forward() == 0);
     nx_data.rev = 0;
     step(100);
     assert(!triggerOn);
@@ -182,6 +191,7 @@ int main(void)
     step(0);
     assert(triggerOn);
     step(5);
+    assert(shoot_is_feeding_forward() == 1);
     step(50);
     assert(!triggerOn);
     rc_data.rc.ch[4] = 0;
@@ -196,11 +206,17 @@ int main(void)
     step(120);
     assert(triggerMode == TriggerMode_e_ShootMulti && triggerOn);
     assert(wantedVTriggerMotor > 0);
+    assert(shoot_is_feeding_forward() == 1);
     rc_data.rc.ch[4] = 0;
     step(125);
     rc_data.rc.ch[4] = -100;
     step(130);
     assert(triggerMode == TriggerMode_e_StuckSolve && wantedVTriggerMotor < 0);
+    assert(triggerOn && shoot_is_feeding_forward() == 0);
+    reset();
+    source = NX_SOURCE_UART;
+    step(0);
+    assert(!fricOn && shoot_is_feeding_forward() == 0);
     puts("PASS: configured auto fire interval / first shot / 41ms duration / no queue / mode and wheel toggles / mouse bypass / tick wrap / 24Hz and repeated frames / manual modes unchanged");
 }
 '''

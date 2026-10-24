@@ -40,6 +40,7 @@ def main():
 #include "Robot_Information.h"
 #include "NX_communicate.h"
 #include "tuning_service.h"
+#include "shot_detection.h"
 #ifdef _WIN32
 #include <io.h>
 #include <fcntl.h>
@@ -69,13 +70,18 @@ static volatile uint8_t can_frame_seen;
 static volatile uint32_t last_can_frame_ms;
 uint8_t fire_t;
 static uint8_t mock_friction_enabled;
+static shoot_detection_state_t mock_detection;
 static motor_measure_t mock_friction_motors[2];
+static unsigned friction_speed_reads;
 static float mock_gyro_mean[3], mock_gyro_std[3];
 static unsigned gyro_stats_reads;
 const RC_ctrl_t *get_remote_control_point(void) { return &rc; }
 uint8_t get_fric(void) { return mock_friction_enabled; }
+void shoot_get_detection(shoot_detection_state_t *state) { *state = mock_detection; }
 const motor_measure_t *get_shoot_motor_measure_point(uint8_t motor)
 {
+    assert(irq_key == 1);
+    ++friction_speed_reads;
     return &mock_friction_motors[motor];
 }
 void INS_GetGyroStats(float mean[3], float std[3])
@@ -140,12 +146,20 @@ int main(int argc, char **argv)
     memset(&YawCtrl, 0, sizeof(YawCtrl));
     snapshot();
 #if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
-    assert(TUNING_CHANNEL_COUNT == 23 && TUNING_FRAME_SIZE == 96);
+    assert(TUNING_CHANNEL_COUNT == 24 && TUNING_FRAME_SIZE == 100);
     assert(channels[12] == 0); /* 云台初始化前空编码器指针也可读取遥测。 */
 #else
-    assert(TUNING_CHANNEL_COUNT == 12 && TUNING_FRAME_SIZE == 52);
+    assert(TUNING_CHANNEL_COUNT == 13 && TUNING_FRAME_SIZE == 56);
     assert(gyro_stats_reads == 0);
 #endif
+    assert(channels[TUNING_CHANNEL_COUNT - 1] == 0);
+    assert(channels[6] == 0 && channels[7] == 0);
+    mock_detection.flag = 1;
+    snapshot();
+    assert(channels[TUNING_CHANNEL_COUNT - 1] == 1 && channels[7] == 1 && irq_key == 0);
+    mock_detection.flag = 0;
+    snapshot();
+    assert(channels[TUNING_CHANNEL_COUNT - 1] == 0 && channels[7] == 0);
     assert(tuning_service_period_ms() == 20 && channels[5] == 0);
     command("parameters:2500,66,6000\n", TUNING_OK);
     assert(pitch_gravity_config.gain == 2500 && PitchCtrl.spd_pid.Ki == 6000);
@@ -206,6 +220,24 @@ int main(int argc, char **argv)
         assert(NX_data.fire == 0 && NX_data.rev == 0);
     }
     command("yaw:181\n", TUNING_OUT_OF_RANGE);
+    /* 双轴同帧进入原视觉入口；无效任一轴时两个目标都不能被部分更新。 */
+    command("aim:-2,179\n", TUNING_OK);
+    assert(data_ready && NX_data.fire == 0 && NX_data.rev == 0);
+    getControlAngles();
+    near_value(PitchCtrl.want_AbsoluteAngleCtrl, -2 * PI / 180);
+    near_value(YawCtrl.want_AbsoluteAngleCtrl, 179 * PI / 180);
+    CAN_Send_to_MCU previous_pair = NX_data;
+    command("aim:90,0\n", TUNING_OUT_OF_RANGE);
+    command("aim:0,181\n", TUNING_OUT_OF_RANGE);
+    command("aim:0,-181\n", TUNING_OUT_OF_RANGE);
+    command("aim:0\n", TUNING_BAD_LENGTH);
+    command("aim:0,1,2\n", TUNING_BAD_LENGTH);
+    command("aim:nan,1\n", TUNING_BAD_LENGTH);
+    assert(!data_ready && memcmp(&NX_data, &previous_pair, sizeof(previous_pair)) == 0);
+    command("aim:5,-179\n", TUNING_OK);
+    getControlAngles();
+    near_value(PitchCtrl.want_AbsoluteAngleCtrl, 5 * PI / 180);
+    near_value(YawCtrl.want_AbsoluteAngleCtrl, -179 * PI / 180);
     /* 高频目标由2 ms控制路径生成，30 Hz一秒应有30轮，且不能改Pitch。 */
     YawCtrl.nowAbsoluteAngle = 0.2f;
     command("yaw_wave:3,30.1,1\n", TUNING_OUT_OF_RANGE);
@@ -280,9 +312,11 @@ int main(int argc, char **argv)
     assert(!yaw_frame_valid); /* 退出自瞄清掉帧记录，重新进入后不拿旧帧估速度 */
     command("target:0\n", TUNING_NOT_ENABLED);
     command("yaw:0\n", TUNING_NOT_ENABLED);
+    command("aim:0,0\n", TUNING_NOT_ENABLED);
     rc.rc.s[1] = 2;
     command("target:0\n", TUNING_WRONG_SOURCE);
     command("yaw:0\n", TUNING_WRONG_SOURCE);
+    command("aim:0,0\n", TUNING_WRONG_SOURCE);
     command("source:0\n", TUNING_OK);
     /* 保留新门控的集成检查：CAN 的 fire/距离与本帧角度一起记录。 */
     const uint8_t can_payload[8] = {1, 0, 0, 0, 0, 1, 0xe8, 0x03};
@@ -340,7 +374,7 @@ int main(int argc, char **argv)
     assert(pitch_gravity_config.gain == 1000);
     command("read:0\n", TUNING_OK);
     assert(irq_key == 0);
-    /* 前十二通道顺序、单位和最终输出保持不变；快照不改写控制。 */
+    /* I6/I7分别为摩擦轮平均实际转速/掉速发射标志，快照不执行检测或改写控制。 */
     pitch_control_debug.actual_angle_rad = -0.25f;
     pitch_control_debug.target_angle_rad = 0.5f;
     YawCtrl.nowAbsoluteAngle = -179 * PI / 180;
@@ -358,6 +392,7 @@ int main(int argc, char **argv)
     PitchCtrl.ECDPoint = &pitch_ecd;
     rc.rc.s[1] = 2;
     mock_friction_enabled = 1;
+    mock_detection.flag = 1;
     mock_friction_motors[0].speed_rpm = 6000;
     mock_friction_motors[1].speed_rpm = -6100;
     mock_gyro_mean[0] = 2.0f;
@@ -369,18 +404,21 @@ int main(int argc, char **argv)
     fire_gate_debug_t fire_before = fire_gate_debug;
     struct GimbalMotorCtrl_s yaw_before = YawCtrl;
     struct GimbalMotorCtrl_s pitch_before = PitchCtrl;
+    unsigned reads_before = friction_speed_reads;
     snapshot();
+    assert(friction_speed_reads == reads_before + 2); /* 每轮只读两个电机，不重复采集。 */
     near_value(channels[0], -0.25f * 180 / PI);
     near_value(channels[1], 0.5f * 180 / PI);
     near_value(channels[2], -179);
     near_value(channels[3], 179);
     assert(channels[4] == 20000 && channels[5] == 1);
-    near_value(channels[6], 0.5f * 180 / PI);
-    near_value(channels[7], -0.25f * 180 / PI);
+    near_value(channels[6], 6050.0f);
+    assert(channels[7] == 1);
     near_value(channels[8], 0.012f);
     near_value(channels[9], 0.047f / 3.0f);
     near_value(channels[10], 0.008f);
     near_value(channels[11], 0.043f / 3.0f);
+    assert(channels[TUNING_CHANNEL_COUNT - 1] == 1);
 #if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
     near_value(channels[12], 90.0f);
     assert(channels[13] == 2 && channels[14] == 1);
@@ -396,6 +434,30 @@ int main(int argc, char **argv)
     assert(memcmp(&fire_before, &fire_after, sizeof(fire_before)) == 0);
     assert(memcmp(&YawCtrl, &yaw_before, sizeof(YawCtrl)) == 0);
     assert(memcmp(&PitchCtrl, &pitch_before, sizeof(PitchCtrl)) == 0);
+    /* 一轮掉速、相反转向、停轮和int16边界均直接反映反馈，不作出弹判定。 */
+    mock_friction_motors[0].speed_rpm = 5000;
+    snapshot();
+    near_value(channels[6], 5550.0f);
+    mock_friction_motors[0].speed_rpm = -6000;
+    mock_friction_motors[1].speed_rpm = 6100;
+    snapshot();
+    near_value(channels[6], 6050.0f);
+    mock_friction_motors[0].speed_rpm = -32768;
+    mock_friction_motors[1].speed_rpm = 32767;
+    snapshot();
+    near_value(channels[6], 32767.5f);
+    mock_friction_motors[0].speed_rpm = 0;
+    mock_friction_motors[1].speed_rpm = 0;
+    mock_detection.flag = 0;
+    snapshot();
+    assert(channels[6] == 0 && channels[7] == 0 && channels[TUNING_CHANNEL_COUNT - 1] == 0);
+    mock_friction_motors[0].speed_rpm = 6000;
+    mock_friction_motors[1].speed_rpm = -6100;
+    mock_friction_enabled = 0;
+    snapshot();
+    assert(channels[6] == 6050 && channels[7] == 0); /* 关轮后仍可观察惯性转速。 */
+    mock_friction_enabled = 1;
+    mock_detection.flag = 1;
 #if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
     /* 原始拨杆1/3/2、摩擦轮开关和编码器变化都独立上传。 */
     const uint8_t switches[] = {1, 3, 2};
@@ -431,7 +493,7 @@ int main(int argc, char **argv)
     pitch_control_debug.actual_angle_rad = -0.25f;
     YawCtrl.radspeed = INFINITY;
     snapshot();
-    assert(channels[7] == 0);
+    assert(channels[6] == 6050 && channels[7] == 1 && isinf(YawCtrl.radspeed));
     YawCtrl.radspeed = -0.00025f;
     /* 门控前置条件不满足时上传清零记录，不能保留上一帧的误差/阈值。 */
     fire_gate_debug = (fire_gate_debug_t){0};
@@ -477,7 +539,7 @@ int main(int argc, char **argv)
 #endif
         assert(fwrite(frame, 1, sizeof(frame), stdout) == sizeof(frame));
     } else {
-        printf("PASS: VOFA %u-channel codec/service + original 12 unchanged + diagnostic switch + read-only snapshots/nonfinite handling/CAN timeout\n", TUNING_CHANNEL_COUNT);
+        printf("PASS: VOFA %u-channel codec/service + I6 friction RPM/I7 shot detection + unchanged frame size + diagnostic switch + read-only snapshots/nonfinite handling/CAN timeout\n", TUNING_CHANNEL_COUNT);
     }
     return 0;
 }
@@ -495,25 +557,25 @@ int main(int argc, char **argv)
                     '-lm', '-o', str(executable)], check=True)
         subprocess.run([str(executable)], check=True)
         frame = subprocess.check_output([str(executable), 'frame'])
-        count = 12
+        count = 13
         if diagnostics:
-            count = 23
+            count = 24
         assert len(frame) == count * 4 + 4 and frame[-4:] == b'\x00\x00\x80\x7f'
         values = struct.unpack(f'<{count}f', frame[:-4])
         assert abs(values[0] + 0.25 * 180 / 3.1415926) < 0.0002
         assert abs(values[3] - 179) < 0.0002 and values[4] == 0 and values[5] == 1
-        assert abs(values[6] - 0.5 * 180 / 3.1415926) < 0.0002
-        assert abs(values[7] + 0.25 * 180 / 3.1415926) < 0.0002
+        assert values[6:8] == (6050, 1)
         for actual, expected in zip(values[8:12], (0.012, 0.047 / 3, 0.008, 0.043 / 3)):
             assert abs(actual - expected) < 1e-7
         if diagnostics:
-            assert values[:12] == baseline
+            assert values[:12] == baseline[:12]
             assert abs(values[12] - 90) < 0.0001
             assert values[13:17] == (2, 1, 6000, -6100)
-            for actual, value in zip(values[17:], (2, -3, 0.5, 0.25, 0.5, 1)):
+            for actual, value in zip(values[17:23], (2, -3, 0.5, 0.25, 0.5, 1)):
                 assert abs(actual - value * 57.2958) < 0.00003
         else:
             baseline = values
+        assert values[-1] == 1
         print(f'PASS: independently decoded {len(frame)}-byte, {count}-channel little-endian JustFloat frame')
 
 

@@ -23,7 +23,8 @@ enum command_id
     CMD_YAW,
     CMD_YAW_WAVE,
     CMD_YAW_PING,
-    CMD_YAW_STOP
+    CMD_YAW_STOP,
+    CMD_AIM
 };
 
 typedef struct
@@ -48,7 +49,8 @@ static const tuning_command_t commands[] = {
     {"yaw", CMD_YAW, 1},
     {"yaw_wave", CMD_YAW_WAVE, 3},
     {"yaw_ping", CMD_YAW_PING, 1},
-    {"yaw_stop", CMD_YAW_STOP, 1}
+    {"yaw_stop", CMD_YAW_STOP, 1},
+    {"aim", CMD_AIM, 2}
 };
 
 static uint16_t stream_period_ms = 20U;
@@ -177,6 +179,11 @@ static uint8_t execute_command(uint8_t id, const float *values)
             return TUNING_OUT_OF_RANGE;
         // 单独修改Yaw时保持Pitch目标，避免把它重置到零。
         return submit_angles(state.control.target_angle_rad, value * DEG_TO_RAD);
+    case CMD_AIM:
+        // 双轴重播同一条命令提交，避免两条单轴命令之间产生半帧目标。
+        if (values[1] < -180.0f || values[1] > 180.0f)
+            return TUNING_OUT_OF_RANGE;
+        return submit_angles(value * DEG_TO_RAD, values[1] * DEG_TO_RAD);
     case CMD_YAW_WAVE:
         return gimbal_tuning_start_yaw_wave(value, values[1], values[2]);
     case CMD_YAW_PING:
@@ -189,7 +196,7 @@ static uint8_t execute_command(uint8_t id, const float *values)
         gimbal_tuning_stop_yaw_wave();
         return TUNING_OK;
     case CMD_STREAM:
-        // 默认12通道52字节；附加诊断23通道96字节时应使用20 ms上传。
+        // 默认13通道56字节；附加诊断24通道100字节时应使用20 ms上传。
         if (value != truncf(value))
             return TUNING_BAD_PARAMETER;
         if (value != 0.0f && (value < 5.0f || value > 2000.0f))
@@ -256,17 +263,22 @@ uint16_t tuning_service_frame(uint8_t output[TUNING_FRAME_SIZE])
     const pitch_control_debug_t *control = &state.control;
     const yaw_control_debug_t *yaw = &state.yaw;
     float channels[TUNING_CHANNEL_COUNT];
+    float friction_speed_sum_rpm;
     uint16_t i;
 
     gimbal_tuning_get_state(&state);
+    // 两轮正常相向转动，先转float取绝对值再平均，避免正负抵消和整数溢出。
+    friction_speed_sum_rpm = fabsf((float)state.friction_speed_rpm[0]);
+    friction_speed_sum_rpm += fabsf((float)state.friction_speed_rpm[1]);
     channels[0] = control->actual_angle_rad * RAD_TO_DEG;
     channels[1] = control->target_angle_rad * RAD_TO_DEG;
     channels[2] = yaw->actual_angle_rad * RAD_TO_DEG;
     channels[3] = yaw->target_angle_rad * RAD_TO_DEG;
     channels[4] = (float)yaw->motor_cmd;
     channels[5] = (float)state.vision_online;
-    channels[6] = yaw->target_speed_rad_s * RAD_TO_DEG;
-    channels[7] = yaw->speed_rad_s * RAD_TO_DEG;
+    // I6观察实际转速下凹，I7显示掉速检测的发射事件；不改变Yaw速度控制。
+    channels[6] = friction_speed_sum_rpm * 0.5f;
+    channels[7] = (float)state.shot_detected;
     // 直接上传本周期门控记录，单位rad；前置条件提前返回时对应字段为0。
     channels[8] = state.fire_gate.yaw_error_rad;
     channels[9] = state.fire_gate.yaw_threshold_rad;
@@ -274,7 +286,7 @@ uint16_t tuning_service_frame(uint8_t output[TUNING_FRAME_SIZE])
     channels[11] = state.fire_gate.pitch_threshold_rad;
 
 #if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
-    // 新增诊断通道只读快照；I0～I11的编号和单位保持原样。
+    // 附加诊断仍沿用原I12～I22编号，与基础遥测共用摩擦轮转速快照。
     channels[12] = state.pitch_encoder_angle_rad * RAD_TO_DEG;
     channels[13] = (float)state.remote_left_switch;
     channels[14] = (float)state.friction_enabled;
@@ -288,6 +300,9 @@ uint16_t tuning_service_frame(uint8_t output[TUNING_FRAME_SIZE])
     channels[21] = state.gyro_std_rad_s[1] * 57.2958f;
     channels[22] = state.gyro_std_rad_s[2] * 57.2958f;
 #endif
+
+    // 末尾副本同步替换为发射标志，总通道数及帧长度不变。
+    channels[TUNING_CHANNEL_COUNT - 1U] = (float)state.shot_detected;
 
     // Inf会被误认作帧尾；仅过滤上传值，不改变控制数据。
     for (i = 0; i < TUNING_CHANNEL_COUNT; ++i)

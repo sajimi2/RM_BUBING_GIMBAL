@@ -16,6 +16,7 @@ extern "C" {
 #include "main.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include "shot_detection.h"
 
 /* 任务时长常量 ------------------------------------------------------------*/
 #define SHOOT_TASK_INIT_TIME 500
@@ -84,6 +85,13 @@ int16_t * getTriggerCurrentP(void);
  * @return 摩擦轮开启状态
  */
 bool_t get_fric(void);
+
+/* 只读正向拨弹执行状态：1为正向拨弹，0为停止、反转或遥控掉线；不是出膛检测。 */
+uint8_t shoot_is_feeding_forward(void);
+
+/* 只读一致的掉速发射事件：flag、上电以来累计次数、最近事件毫秒时刻；不清除事件。
+ * 之后视觉发送任务可读取count差值判断新增事件，当前不改变任何CAN载荷。 */
+void shoot_get_detection(shoot_detection_state_t *state);
 
 /* 内部函数声明（供其他模块使用）------------------------------------------*/
 

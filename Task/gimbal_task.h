@@ -144,11 +144,12 @@ typedef struct
     uint8_t remote_online;
     uint8_t automatic;
     uint8_t vision_online;
-    // 仅供诊断：编码器不对零，转速保留rpm，陀螺保留rad/s直到上传时换单位。
+    uint8_t shot_detected; // 摩擦轮明显掉速触发的发射标志，保持50 ms供观察。
+    // 仅供观测：编码器不对零，转速保留rpm，陀螺保留rad/s直到上传时换单位。
     fp32 pitch_encoder_angle_rad;
     uint8_t remote_left_switch;
     uint8_t friction_enabled;
-    int16_t friction_speed_rpm[2];
+    int16_t friction_speed_rpm[2]; // 基础遥测也采集，保留两轮原始有符号反馈。
     fp32 gyro_mean_rad_s[3];
     fp32 gyro_std_rad_s[3];
 } pitch_tuning_state_t;

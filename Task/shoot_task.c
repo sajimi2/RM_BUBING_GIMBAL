@@ -22,6 +22,8 @@
 #include "main.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "shot_detection.h"
+#include <math.h>
 
 //任务时长常量
 #define SHOOT_TASK_INIT_TIME 500
@@ -93,6 +95,8 @@ static fp32 wantedVShootMotor[2],wantedVTriggerMotor;
 static fp32 presentVShootMotor[2],presentVTriggerMotor;
 
 static pid_type_def shootMotorPIDs[2],triggerMotorPID;
+static shot_detector_t shotDetector;
+static shoot_detection_state_t shotDetection;
 
 static void initShootPIDs(void);
 static void getInstruction(void);
@@ -103,6 +107,7 @@ void setSpeed(void);
 static void calcCurrent(void);
 static void getShootMotorSpeed(void);
 static void tryStartAutoShot(TickType_t now);
+static void updateShotDetection(void);
 
 void shoot_task(void const *pvParameters)
 {
@@ -125,6 +130,8 @@ void shoot_task(void const *pvParameters)
         setSpeed();
 		
         getShootMotorSpeed();
+
+        updateShotDetection();           // 只观察摩擦轮掉速，不改变任何电机目标或PID。
 		
         calcCurrent();                   //计算PID
 
@@ -403,4 +410,77 @@ volatile int16_t * getTriggerCurrentP(void)
 bool_t get_fric(void)
 {
 	return fricOn;
+}
+
+/* 两轮相向旋转，取原始反馈绝对值的平均；临界区只覆盖读取。 */
+static float getFrictionMeanRpm(void)
+{
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    const motor_measure_t *motor0 = get_shoot_motor_measure_point(0);
+    const motor_measure_t *motor1 = get_shoot_motor_measure_point(1);
+    int16_t speed0 = motor0->speed_rpm;
+    int16_t speed1 = motor1->speed_rpm;
+    __set_PRIMASK(key);
+
+    float speed_sum_rpm = fabsf((float)speed0);
+    speed_sum_rpm += fabsf((float)speed1);
+    return speed_sum_rpm * 0.5f;
+}
+
+/* 每5 ms观察一次，发布事件时短暂关中断，读者不会拿到一半更新的计数和时刻。 */
+static void updateShotDetection(void)
+{
+    float rpm = getFrictionMeanRpm();
+    uint32_t now_ms = HAL_GetTick();
+    uint8_t detected = shot_detector_update(&shotDetector, rpm, fricOn, now_ms);
+
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    // 新事件立即置位；累计数不随关轮清零，供未来视觉识别漏过的短脉冲。
+    if (detected)
+    {
+        shotDetection.count++;
+        shotDetection.last_event_ms = now_ms;
+        shotDetection.flag = 1U;
+    }
+    // 只延长显示脉冲，不延迟检测，也不限制下一次真实掉速事件。
+    else if ((uint32_t)(now_ms - shotDetection.last_event_ms) >= SHOT_DETECTION_FLAG_MS)
+    {
+        shotDetection.flag = 0U;
+    }
+    __set_PRIMASK(key);
+}
+
+void shoot_get_detection(shoot_detection_state_t *state)
+{
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    *state = shotDetection;
+    __set_PRIMASK(key);
+}
+
+uint8_t shoot_is_feeding_forward(void)
+{
+    // 遥控掉线时电控已禁止拨弹输出，不能标记为正在正向拨弹。
+    if (!rc_online)
+    {
+        return 0;
+    }
+    // 摩擦轮关闭或拨弹未启动时，不把开火请求当作拨弹执行。
+    if (!fricOn)
+    {
+        return 0;
+    }
+    // 拨弹未启动时，即使其他条件满足也保持未执行状态。
+    if (!triggerOn)
+    {
+        return 0;
+    }
+    // 只标记正向目标，排除停止和反转解堵；不表示弹丸已经出膛。
+    if (wantedVTriggerMotor > 0.0f)
+    {
+        return 1;
+    }
+    return 0;
 }

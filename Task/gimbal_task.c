@@ -44,7 +44,7 @@
  * 必须大于 Ki=0 时观察到的静差，否则积分永远不会介入。单位 rad，约 5.7°。 */
 #define PITCH_I_SEPARATION_RAD_DEFAULT 0.1f
 
-#define YAW_SPD_KP 10000000.0f
+#define YAW_SPD_KP 13000000.0f
 //数值大是因为角速度计算那里的dt是ms，PID内部沿用rad/ms，要乘1000
 //实际除回去就是10000，速度环控制的是电机电压值，范围为0~25000，所以合理
 #define YAW_SPD_KI 0	
@@ -87,7 +87,7 @@
 // Yaw速度前馈：目标怎么动是已知的，直接把目标角速度加到速度环目标上，不等误差出现
 /* 速度环目标 = 位置环输出 + 增益 × 目标角速度。
  * 视觉来源的目标角速度用相邻帧估算，跳变会被放大，所以增益不给满（实车约0.66）。 */
-#define YAW_FF_SPEED_GAIN_DEFAULT      0.7f    // 速度前馈增益，调到1为完全前馈
+#define YAW_FF_SPEED_GAIN_DEFAULT      0.66f    // 速度前馈增益，调到1为完全前馈
 #define YAW_FF_GAIN_MAX                2.0f    // 增益超过它视为填错，按关闭处理
 #define YAW_FF_SPEED_MAX               10.0f   // 估算的目标角速度超过约573°/s视为数据错误，按0处理
 #define YAW_FF_FRAME_DT_MIN_MS         30U     // 两帧间隔小于它（连发帧或成串到达），不拿来估速度，避免短间隔把跳变放大成很大的速度
@@ -707,17 +707,13 @@ static void getTuningDiagnostics(pitch_tuning_state_t *state)
     const RC_ctrl_t *remote = get_remote_control_point();
     state->remote_left_switch = remote->rc.s[1];
     state->friction_enabled = get_fric();
-    for (uint8_t motor = 0; motor < 2; motor++)
-    {
-        const motor_measure_t *measure = get_shoot_motor_measure_point(motor);
-        state->friction_speed_rpm[motor] = measure->speed_rpm;
-    }
     INS_GetGyroStats(state->gyro_mean_rad_s, state->gyro_std_rad_s);
 }
 #endif
 
 void gimbal_tuning_get_state(pitch_tuning_state_t *state)
 {
+    shoot_detection_state_t detection;
     uint32_t key = __get_PRIMASK();
     __disable_irq();
     state->tick_ms = xTaskGetTickCount();
@@ -729,6 +725,14 @@ void gimbal_tuning_get_state(pitch_tuning_state_t *state)
     state->remote_online = rc_online;
     state->automatic = gimbal_tuning_is_enabled();
     state->vision_online = NX_VisionOnline();
+    shoot_get_detection(&detection);
+    state->shot_detected = detection.flag;
+    // 基础遥测也读取摩擦轮原始转速，用于观察拨弹前后的掉速；不启用陀螺诊断。
+    for (uint8_t motor = 0; motor < 2; motor++)
+    {
+        const motor_measure_t *measure = get_shoot_motor_measure_point(motor);
+        state->friction_speed_rpm[motor] = measure->speed_rpm;
+    }
 
     // 只复制Yaw的控制结果，不在调参任务中重新执行PID。
     state->yaw.target_angle_rad = YawCtrl.want_AbsoluteAngleCtrl;

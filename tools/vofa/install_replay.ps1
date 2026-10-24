@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $pluginRoot -PathType Container)) {
 }
 $widgetSource = Join-Path $PSScriptRoot 'vision_replay'
 $widgetTarget = Join-Path $pluginRoot 'vision_replay'
-$names = @('vision_replay.qml', 'replay.js', 'recording.js')
+$names = @('vision_replay.qml', 'replay.js', 'recording.js', 'simulation.js', 'dual_recording.js')
 foreach ($name in $names) {
     if (-not (Test-Path -LiteralPath (Join-Path $widgetSource $name) -PathType Leaf)) {
         throw "Source file missing: $name"

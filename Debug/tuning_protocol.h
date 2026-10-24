@@ -4,11 +4,11 @@
 #include <stdint.h>
 #include "tuning_config.h"
 
-/* 上行：默认12通道，开启附加诊断后23通道；末尾均为JustFloat帧尾。 */
+/* 上行：默认13通道，开启附加诊断后24通道；发射标志副本均放在最后。 */
 #if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
-#define TUNING_CHANNEL_COUNT 23U
+#define TUNING_CHANNEL_COUNT 24U
 #else
-#define TUNING_CHANNEL_COUNT 12U
+#define TUNING_CHANNEL_COUNT 13U
 #endif
 #define TUNING_FRAME_SIZE (4U * TUNING_CHANNEL_COUNT + 4U)
 #define TUNING_LINE_SIZE 96U

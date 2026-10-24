@@ -517,6 +517,16 @@
           <GroupName>Control</GroupName>
           <Files>
             <File>
+              <FileName>shot_detection.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Control\shot_detection.c</FilePath>
+            </File>
+            <File>
+              <FileName>shot_detection.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Control\shot_detection.h</FilePath>
+            </File>
+            <File>
               <FileName>pid.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Control\pid.c</FilePath>

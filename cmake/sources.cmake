@@ -14,6 +14,7 @@ set(FIRMWARE_SOURCES
     Debug/tuning_service.c
     Debug/tuning_uart.c
     Control/pid.c
+    Control/shot_detection.c
     Control/controller.c
     Applications/CAN_recieve_send.c
     Applications/remote_control.c
