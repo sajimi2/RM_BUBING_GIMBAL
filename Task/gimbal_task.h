@@ -100,12 +100,12 @@ extern volatile fire_gate_debug_t fire_gate_debug;
 /* 发射任务查询本周期是否允许开火：视觉允许、帧未过期、两轴已对准并保持。 */
 uint8_t gimbal_fire_allowed(void);
 
-/* Yaw目标从哪来：前馈用的目标角速度、角加速度的来源。 */
+/* Yaw目标从哪来：速度前馈用的目标角速度的来源。 */
 enum yaw_target_source
 {
     YAW_TARGET_SOURCE_NONE = 0,   // 手动或没有有效目标，前馈为0
     YAW_TARGET_SOURCE_VISION = 1, // 视觉帧（CAN或串口模拟），速度由相邻帧估算
-    YAW_TARGET_SOURCE_WAVE = 2    // C板波形测试，速度和加速度按公式精确计算
+    YAW_TARGET_SOURCE_WAVE = 2    // C板波形测试，速度按公式精确计算
 };
 
 /* Yaw前馈的调试记录，每个控制周期刷新，只供观察。 */
@@ -113,19 +113,12 @@ typedef struct
 {
     uint8_t source;            // 见 yaw_target_source
     fp32 target_speed_rad_s;   // 本周期目标角速度
-    fp32 target_accel_rad_s2;  // 本周期目标角加速度（视觉来源时为0）
     fp32 speed_ff_rad_s;       // 实际加到速度环目标上的量
-    fp32 out_ff;               // 实际加到电机输出上的量
     uint32_t frame_dt_ms;      // 最近两帧视觉的间隔
 } yaw_ff_debug_t;
 
-/* Yaw前馈参数：两个增益默认0即关闭；模型参数单位按rad/s、rad/s²。 */
+/* Yaw速度前馈增益：0为关闭，1为完全前馈。 */
 extern volatile fp32 yaw_ff_speed_gain;
-extern volatile fp32 yaw_ff_out_gain;
-extern volatile fp32 yaw_ff_inertia;
-extern volatile fp32 yaw_ff_back_emf;
-extern volatile fp32 yaw_ff_friction;
-extern volatile uint8_t yaw_ff_interp;
 extern volatile yaw_ff_debug_t yaw_ff_debug;
 
 /* Yaw最近一次控制结果，仅供观察，不参与控制计算。 */

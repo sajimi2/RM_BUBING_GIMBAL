@@ -84,22 +84,14 @@
 #define YAW_FRICTION_NEG_OUT_DEFAULT     1000.0f      // Yaw角度减小方向的门槛，默认关闭；建议从600开始试
 #define YAW_FRICTION_ERROR_RAD_DEFAULT   0.0087f   // 约0.5°，离目标比它近时不补足
 
-// Yaw目标前馈：目标怎么动是已知的，直接把需要的速度和输出给出去，不等误差出现
-/* 速度前馈：速度环目标 = 位置环输出 + 增益 × 目标角速度。
- * 输出前馈：电机输出 += 增益 × (惯量 × 目标角加速度 + 速度项 × 目标角速度 + 摩擦 × 运动方向)。
- * 两个增益默认0即关闭；模型参数来自VOFA数据回归，单位按rad/s、rad/s²，需实车再调。 */
+// Yaw速度前馈：目标怎么动是已知的，直接把目标角速度加到速度环目标上，不等误差出现
+/* 速度环目标 = 位置环输出 + 增益 × 目标角速度。
+ * 视觉来源的目标角速度用相邻帧估算，跳变会被放大，所以增益不给满（实车约0.66）。 */
 #define YAW_FF_SPEED_GAIN_DEFAULT      0.7f    // 速度前馈增益，调到1为完全前馈
-#define YAW_FF_OUT_GAIN_DEFAULT        0.0f    // 输出前馈增益
 #define YAW_FF_GAIN_MAX                2.0f    // 增益超过它视为填错，按关闭处理
-#define YAW_FF_INERTIA_DEFAULT         200.0f  // 惯量项：每1 rad/s²需要的输出（回归约3.5 / (°/s²)）
-#define YAW_FF_BACK_EMF_DEFAULT        1100.0f // 速度项：每1 rad/s需要的输出（回归约20 / (°/s)，反电动势加粘滞）
-#define YAW_FF_FRICTION_DEFAULT        900.0f  // 动摩擦：运动时一直要克服的输出
-#define YAW_FF_FRICTION_MIN_SPEED      0.087f  // 约5°/s，目标比这慢时不加摩擦项，避免视觉抖动让方向来回翻
-#define YAW_FF_OUT_MAX                 10000.0f // 输出前馈自身限幅
 #define YAW_FF_SPEED_MAX               10.0f   // 估算的目标角速度超过约573°/s视为数据错误，按0处理
-#define YAW_FF_FRAME_DT_MIN_MS         30U     // 两帧间隔小于它（重复帧或成串到达），不拿来估速度
-#define YAW_FF_FRAME_DT_MAX_MS         100U    // 两帧间隔大于它（中间断过）S，速度按0重新开始
-#define YAW_FF_INTERP_MAX_MS           50U     // 帧间插值最多往前推这么久，约比一帧（42 ms）多一点
+#define YAW_FF_FRAME_DT_MIN_MS         30U     // 两帧间隔小于它（连发帧或成串到达），不拿来估速度，避免短间隔把跳变放大成很大的速度
+#define YAW_FF_FRAME_DT_MAX_MS         100U    // 两帧间隔大于它（中间断过），速度按0重新开始
 
 // 开火门控：视觉允许开火、视觉帧没过期、云台已对准且保持一小段时间，才允许拨弹
 /* 允许误差（rad）= 允许偏离的半宽（m）/ 距离（m）- 散布角（rad），再做上下限。
@@ -286,17 +278,11 @@ static yaw_wave_state_t yaw_wave;
 
 // Yaw目标前馈参数，可在调试器里修改
 volatile fp32 yaw_ff_speed_gain = YAW_FF_SPEED_GAIN_DEFAULT;
-volatile fp32 yaw_ff_out_gain = YAW_FF_OUT_GAIN_DEFAULT;
-volatile fp32 yaw_ff_inertia = YAW_FF_INERTIA_DEFAULT;
-volatile fp32 yaw_ff_back_emf = YAW_FF_BACK_EMF_DEFAULT;
-volatile fp32 yaw_ff_friction = YAW_FF_FRICTION_DEFAULT;
-volatile uint8_t yaw_ff_interp = 0; // 1：视觉两帧之间按估算速度往前推目标
 volatile yaw_ff_debug_t yaw_ff_debug; // 每周期刷新，只供观察
-// 本周期目标的角速度（rad/s）和角加速度（rad/s²），由getControlAngles每周期重新给出
+// 本周期目标的角速度（rad/s），由getControlAngles每周期重新给出
 static fp32 yaw_target_speed;
-static fp32 yaw_target_accel;
 static uint8_t yaw_target_source;
-// 最近一帧视觉Yaw目标，用来估算目标角速度和做帧间插值
+// 最近一帧视觉Yaw目标，用来估算目标角速度
 static uint8_t yaw_frame_valid;      // 0表示还没收到过帧
 static fp32 yaw_frame_angle;         // 这一帧的Yaw目标，rad
 static uint32_t yaw_frame_time;      // 收到这一帧的时间，ms
@@ -589,7 +575,6 @@ void getControlAngles(void)
     const uint8_t automatic = robotIsAuto() || rc_p->rc.s[1] == 2;
     // 目标运动每周期重新给出；手动、无力等情况下保持为0，前馈不起作用
     yaw_target_speed = 0.0f;
-    yaw_target_accel = 0.0f;
     yaw_target_source = YAW_TARGET_SOURCE_NONE;
     /* 退出自瞄或遥控掉线后撤掉串口来源，不能在重新使能时消费旧测试目标。 */
     if (!automatic || !rc_online || *robotMode == RobotState_e_Powerless)
@@ -937,10 +922,9 @@ static void updateYawWave(void)
         angle += 2.0f * PI;
     YawCtrl.want_AbsoluteAngleCtrl = angle;
 
-    // 波形是已知的正弦，目标的角速度和角加速度可以直接按公式算，是精确值
+    // 波形是已知的正弦，目标的角速度可以直接按公式算，是精确值
     const fp32 omega = 2.0f * PI * yaw_wave.frequency_hz;  // rad/s
     yaw_target_speed = yaw_wave.amplitude_rad * omega * cosf(phase);
-    yaw_target_accel = -yaw_wave.amplitude_rad * omega * omega * sinf(phase);
     yaw_target_source = YAW_TARGET_SOURCE_WAVE;
 }
 
@@ -1008,8 +992,7 @@ static void recordYawFrame(fp32 targetAngle)
 /**
  * @brief 每个控制周期给出视觉目标的运动，并按开关做帧间插值
  *
- * 视觉帧没过期时，目标角速度取相邻帧估算值，角加速度估不准，按0。
- * 插值打开时，两帧之间的目标 = 这一帧目标 + 估算速度 × 距这一帧的时间，最多往前推50 ms。
+ * 视觉帧没过期时，目标角速度取相邻帧估算值。
  */
 static void updateYawVisionMotion(uint8_t automatic)
 {
@@ -1031,23 +1014,7 @@ static void updateYawVisionMotion(uint8_t automatic)
     }
 
     yaw_target_speed = yaw_frame_speed;
-    yaw_target_accel = 0.0f;
     yaw_target_source = YAW_TARGET_SOURCE_VISION;
-
-    // 插值没打开：目标保持这一帧的值不变
-    if (yaw_ff_interp != 1)
-    {
-        return;
-    }
-
-    // 往前推的时间封顶，下一帧迟迟不来时不会一直推下去
-    uint32_t pushMs = sinceFrame;
-    if (pushMs > YAW_FF_INTERP_MAX_MS)
-    {
-        pushMs = YAW_FF_INTERP_MAX_MS;
-    }
-    const fp32 pushAngle = yaw_frame_speed * ((fp32)pushMs * 0.001f);
-    YawCtrl.want_AbsoluteAngleCtrl = radFormat(yaw_frame_angle + pushAngle);
 }
 
 /**
@@ -1084,56 +1051,6 @@ static fp32 calcYawSpeedFeedforward(void)
     // 目标角速度是rad/s，速度环内部用rad/ms，除以1000
     const fp32 speedFf = gain * yaw_target_speed * 0.001f;
     return speedFf;
-}
-
-/**
- * @brief Yaw输出前馈：直接加到电机输出上的量
- *
- * 输出 = 增益 × (惯量 × 目标角加速度 + 速度项 × 目标角速度 + 摩擦 × 运动方向)，再限幅。
- * 目标很慢时不加摩擦项，避免视觉的小抖动让摩擦项来回翻向。
- * @return 电机输出单位；增益为0时为0
- */
-static fp32 calcYawOutputFeedforward(void)
-{
-    const fp32 gain = checkFeedforwardGain(yaw_ff_out_gain);
-
-    // 输出前馈关闭
-    if (gain == 0.0f)
-    {
-        return 0.0f;
-    }
-
-    // 模型参数填错（不是有效数字），整个输出前馈按关闭处理
-    if (!isfinite(yaw_ff_inertia))
-    {
-        return 0.0f;
-    }
-    if (!isfinite(yaw_ff_back_emf))
-    {
-        return 0.0f;
-    }
-    if (!isfinite(yaw_ff_friction))
-    {
-        return 0.0f;
-    }
-
-    const fp32 inertiaOut = yaw_ff_inertia * yaw_target_accel;
-    const fp32 speedOut = yaw_ff_back_emf * yaw_target_speed;
-
-    // 摩擦项：按目标运动方向加；目标太慢时不加
-    fp32 frictionOut = 0.0f;
-    if (yaw_target_speed > YAW_FF_FRICTION_MIN_SPEED)
-    {
-        frictionOut = yaw_ff_friction;
-    }
-    if (yaw_target_speed < -YAW_FF_FRICTION_MIN_SPEED)
-    {
-        frictionOut = -yaw_ff_friction;
-    }
-
-    fp32 outFf = gain * (inertiaOut + speedOut + frictionOut);
-    range_limit_inside(outFf, YAW_FF_OUT_MAX);
-    return outFf;
 }
 
 /**
@@ -1504,9 +1421,7 @@ void unitPID_calc(void)
     const fp32 yawFrictionOut = calcFrictionFill(&YawCtrl, &yaw_friction_state, YawCtrl.spd_pid.out,
                                                  yaw_friction_pos_out, yaw_friction_neg_out,
                                                  yaw_friction_error_rad);
-    // Yaw输出前馈：惯量、反电动势和动摩擦需要的输出，直接加上
-    const fp32 yawOutFf = calcYawOutputFeedforward();
-    fp32 yawTotalOut = YawCtrl.spd_pid.out + yawFrictionOut + yawOutFf;
+    fp32 yawTotalOut = YawCtrl.spd_pid.out + yawFrictionOut;
     // 保险：门槛上限远小于输出上限，正常碰不到，但加完补偿后仍统一限幅一次
     range_limit_inside(yawTotalOut, YAW_VOLT_MAX_OUT);
     YawCtrl.Volt_out = (int16_t)yawTotalOut;
@@ -1514,9 +1429,7 @@ void unitPID_calc(void)
     // 记录前馈，供调试器观察
     yaw_ff_debug.source = yaw_target_source;
     yaw_ff_debug.target_speed_rad_s = yaw_target_speed;
-    yaw_ff_debug.target_accel_rad_s2 = yaw_target_accel;
     yaw_ff_debug.speed_ff_rad_s = yawSpeedFf * 1000.0f;
-    yaw_ff_debug.out_ff = yawOutFf;
     yaw_ff_debug.frame_dt_ms = yaw_frame_dt;
 
     // Yaw轴无力：输出清零，恢复后要重新确认停住

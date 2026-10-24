@@ -56,7 +56,7 @@ functions = '\n'.join(function(name) for name in (
     'radFormat', 'gimbal_PID_calc', 'calcPitchGravity',
     'resetFrictionState', 'restartStillTimer', 'isAxisStill', 'checkFrictionThreshold',
     'calcFrictionFill', 'recordYawFrame', 'updateYawVisionMotion', 'checkFeedforwardGain',
-    'calcYawSpeedFeedforward', 'calcYawOutputFeedforward',
+    'calcYawSpeedFeedforward',
     'limitPitchOutput', 'pitch_speed_pid_calc', 'unitPID_calc',
     'recordFireFrame', 'calcFireThreshold', 'checkFireWindow', 'updateFireGate',
     'gimbal_fire_allowed'))
@@ -94,13 +94,7 @@ static void setup_default(void)
     resetFrictionState(&yaw_friction_state);
     /* 前馈显式关闭，目标运动清零。 */
     yaw_ff_speed_gain = 0;
-    yaw_ff_out_gain = 0;
-    yaw_ff_inertia = YAW_FF_INERTIA_DEFAULT;
-    yaw_ff_back_emf = YAW_FF_BACK_EMF_DEFAULT;
-    yaw_ff_friction = YAW_FF_FRICTION_DEFAULT;
-    yaw_ff_interp = 0;
     yaw_target_speed = 0;
-    yaw_target_accel = 0;
     yaw_target_source = YAW_TARGET_SOURCE_NONE;
     yaw_frame_valid = 0;
     test_pitch_rpm = 0;
@@ -625,10 +619,9 @@ static void yaw_ff_tests(void)
     /* 增益为0时，即使有目标运动，输出与原来完全一样。 */
     setup_default();
     yaw_target_speed = 1.0f;
-    yaw_target_accel = 5.0f;
     unitPID_calc();
     assert(YawCtrl.Volt_out == 0);
-    near_value(yaw_ff_debug.out_ff, 0);
+    near_value(yaw_ff_debug.speed_ff_rad_s, 0);
 
     /* 速度前馈：1 rad/s 的目标速度加到速度环目标上（内部 0.001 rad/ms）。 */
     setup_default();
@@ -648,51 +641,15 @@ static void yaw_ff_tests(void)
     for (int i = 0; i < 3; ++i) {
         setup_default();
         yaw_target_speed = 1.0f;
-        yaw_target_accel = 5.0f;
         yaw_ff_speed_gain = bad_gains[i];
-        yaw_ff_out_gain = bad_gains[i];
         unitPID_calc();
         near_value(yaw_speed_setpoint, 0);
         assert(YawCtrl.Volt_out == 0);
     }
 
-    /* 输出前馈：200×2 + 1100×0.5 + 900 = 1850。 */
-    setup_default();
-    yaw_ff_out_gain = 1.0f;
-    yaw_target_speed = 0.5f;
-    yaw_target_accel = 2.0f;
-    unitPID_calc();
-    near_value(yaw_ff_debug.out_ff, 1850);
-    assert(YawCtrl.Volt_out == 1850);
-    /* 反方向摩擦项取负。 */
-    yaw_target_speed = -0.5f;
-    yaw_target_accel = -2.0f;
-    unitPID_calc();
-    near_value(yaw_ff_debug.out_ff, -1850);
-    /* 目标比 5°/s 慢：不加摩擦项。 */
-    yaw_target_speed = 0.05f;
-    yaw_target_accel = 0;
-    unitPID_calc();
-    near_value(yaw_ff_debug.out_ff, 1100 * 0.05f);
-    /* 输出前馈自身限幅。 */
-    yaw_target_speed = 0;
-    yaw_target_accel = 1000.0f;
-    unitPID_calc();
-    near_value(yaw_ff_debug.out_ff, YAW_FF_OUT_MAX);
-    /* 模型参数填错：整个输出前馈关闭。 */
-    yaw_target_speed = 0.5f;
-    yaw_target_accel = 2.0f;
-    yaw_ff_friction = NAN;
-    unitPID_calc();
-    near_value(yaw_ff_debug.out_ff, 0);
-    yaw_ff_friction = YAW_FF_FRICTION_DEFAULT;
-    yaw_ff_inertia = INFINITY;
-    unitPID_calc();
-    near_value(yaw_ff_debug.out_ff, 0);
-
     /* 无力时前馈也不能让电机出力。 */
     setup_default();
-    yaw_ff_out_gain = 1.0f;
+    yaw_ff_speed_gain = 1.0f;
     yaw_target_speed = 0.5f;
     YawCtrl.nopowerflag = 1;
     unitPID_calc();
@@ -707,11 +664,19 @@ static void yaw_ff_tests(void)
     recordYawFrame(0.11f);
     near_value(yaw_frame_speed, 0.01f / 0.042f);
     assert(yaw_frame_dt == 42);
-    /* 间隔小于 10 ms 的帧不拿来估速度，保留上一帧。 */
+    /* 间隔小于 30 ms 的连发帧不拿来估速度，保留上一个参考帧。 */
     YawCtrl.nowTime = 1046;
     recordYawFrame(0.5f);
     near_value(yaw_frame_speed, 0.01f / 0.042f);
     near_value(yaw_frame_angle, 0.11f);
+    YawCtrl.nowTime = 1062;               /* 距参考帧 20 ms，仍小于 30 ms */
+    recordYawFrame(0.5f);
+    near_value(yaw_frame_speed, 0.01f / 0.042f);
+    near_value(yaw_frame_angle, 0.11f);
+    YawCtrl.nowTime = 1082;               /* 距参考帧 40 ms：和参考帧比，不和连发帧比 */
+    recordYawFrame(0.13f);
+    near_value(yaw_frame_speed, 0.02f / 0.040f);
+    near_value(yaw_frame_angle, 0.13f);
     /* 间隔超过 100 ms：速度按0重新开始。 */
     YawCtrl.nowTime = 1200;
     recordYawFrame(0.2f);
@@ -731,7 +696,7 @@ static void yaw_ff_tests(void)
     recordYawFrame(NAN);
     near_value(yaw_frame_angle, -PI + 0.005f + 0.5f);
 
-    /* 每周期给出视觉目标运动；插值关闭时目标不动。 */
+    /* 每周期给出视觉目标的速度；目标角保持这一帧的值，不往前推。 */
     setup_default();
     YawCtrl.nowTime = 2000;
     recordYawFrame(0.1f);
@@ -742,17 +707,8 @@ static void yaw_ff_tests(void)
     updateYawVisionMotion(1);
     assert(yaw_target_source == YAW_TARGET_SOURCE_VISION);
     near_value(yaw_target_speed, 0.5f);
-    near_value(yaw_target_accel, 0);
     near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.12f);
-    /* 插值打开：20 ms 后目标往前推 0.5 × 0.02 = 0.01 rad。 */
-    yaw_ff_interp = 1;
-    updateYawVisionMotion(1);
-    near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.13f);
-    /* 最多往前推 50 ms。 */
-    YawCtrl.nowTime = 2120;
-    updateYawVisionMotion(1);
-    near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.12f + 0.5f * 0.05f);
-    /* 帧超过 100 ms 没更新：不给目标运动，也不再推。 */
+    /* 帧超过 100 ms 没更新：不给目标运动。 */
     yaw_target_source = YAW_TARGET_SOURCE_NONE;
     yaw_target_speed = 0;
     YawCtrl.want_AbsoluteAngleCtrl = 0.12f;
@@ -765,7 +721,6 @@ static void yaw_ff_tests(void)
     YawCtrl.nowTime = 2060;
     updateYawVisionMotion(0);
     assert(yaw_target_source == YAW_TARGET_SOURCE_NONE);
-    yaw_ff_interp = 0;
 }
 
 int main(void)

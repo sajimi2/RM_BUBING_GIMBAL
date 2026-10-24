@@ -219,10 +219,9 @@ int main(int argc, char **argv)
             command("yaw_ping:0\n", TUNING_OK);
         getControlAngles();
         near_value(YawCtrl.want_AbsoluteAngleCtrl, 0.2f + 3 * PI / 180 * sinf(2 * PI * 30 * tick / 1000));
-        /* 波形测试时，前馈用的目标角速度、角加速度按公式精确给出。 */
+        /* 波形测试时，前馈用的目标角速度按公式精确给出。 */
         assert(yaw_target_source == YAW_TARGET_SOURCE_WAVE);
         near_value(yaw_target_speed / 100, 3 * PI / 180 * 2 * PI * 30 * cosf(2 * PI * 30 * tick / 1000) / 100);
-        near_value(yaw_target_accel / 10000, -3 * PI / 180 * 2 * PI * 30 * 2 * PI * 30 * sinf(2 * PI * 30 * tick / 1000) / 10000);
         near_value(PitchCtrl.want_AbsoluteAngleCtrl, 5 * PI / 180);
         assert(NX_data.fire == 0 && NX_data.rev == 0);
     }
