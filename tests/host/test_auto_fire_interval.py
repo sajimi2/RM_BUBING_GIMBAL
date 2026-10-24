@@ -1,4 +1,4 @@
-"""编译真实自瞄拨弹入口和状态机，验证200 ms限频；不连接硬件。"""
+"""编译真实自瞄拨弹入口和状态机，验证当前配置的最小间隔；不连接硬件。"""
 from pathlib import Path
 import os
 import re
@@ -72,6 +72,8 @@ static void reset(void)
 }
 int main(void)
 {
+    const TickType_t interval = AUTO_FIRE_MIN_INTERVAL_TICKS;
+    assert(interval >= 200U);
     /* 首发立即启动；0也能作为有效启动时刻。重复视觉帧不续期、不绕过间隔。 */
     reset();
     fire_t = 1;
@@ -81,29 +83,29 @@ int main(void)
     assert(triggerOn && shootOneStartTime == 0);
     step(45);
     assert(!triggerOn); /* 41 ms持续时间保留，5 ms轮询在45 ms停止 */
-    for (unsigned now = 50; now < 200; now += 5) {
+    for (unsigned now = 50; now < interval; now += 5) {
         fire_t = 1;
         step(now);
         assert(!triggerOn && autoFireLastStartTime == 0);
     }
     fire_t = 1;
-    step(199);
+    step(interval - 1);
     assert(!triggerOn);
-    step(200);
-    assert(triggerOn && shootOneStartTime == 200 && autoFireLastStartTime == 200);
-    step(245);
+    step(interval);
+    assert(triggerOn && shootOneStartTime == interval && autoFireLastStartTime == interval);
+    step(interval + 45);
     assert(!triggerOn);
 
     /* 到期仍须满足当下门控；失败请求不排队，也不消耗间隔。 */
     gate = 0;
     fire_t = 1;
-    step(400);
-    assert(!triggerOn && autoFireLastStartTime == 200);
-    step(450);
+    step(2 * interval);
+    assert(!triggerOn && autoFireLastStartTime == interval);
+    step(2 * interval + 50);
     assert(!triggerOn);
     gate = 1;
-    step(455);
-    assert(triggerOn && autoFireLastStartTime == 455);
+    step(2 * interval + 55);
+    assert(triggerOn && autoFireLastStartTime == 2 * interval + 55);
 
     /* 开关摩擦轮、退出再进入自瞄，都不能清除冷却。 */
     reset();
@@ -119,9 +121,9 @@ int main(void)
     step(150);
     automatic = 1;
     fire_t = 1;
-    step(199);
+    step(interval - 1);
     assert(!triggerOn);
-    step(200);
+    step(interval);
     assert(triggerOn);
 
     /* 自瞄中鼠标不能走手动连发旁路；切入自瞄也不能沿用手动连发。 */
@@ -141,18 +143,18 @@ int main(void)
     step(60);
     assert(!triggerOn);
 
-    /* 无符号tick回绕：199 ms拦截，200 ms放行。 */
+    /* 无符号tick回绕：间隔到期前拦截，到期时放行。 */
     reset();
     TickType_t first = UINT32_MAX - 99U;
     step(first);
     assert(triggerOn);
     step(first + 45U);
-    step(first + 199U);
+    step(first + interval - 1);
     assert(!triggerOn);
-    step(first + 200U);
-    assert(triggerOn && autoFireLastStartTime == 100U);
+    step(first + interval);
+    assert(triggerOn && autoFireLastStartTime == (TickType_t)(first + interval));
 
-    /* 真实收帧节奏24 Hz和最坏每5 ms重复请求，均至少间隔200 ms。 */
+    /* 真实收帧节奏24 Hz和最坏每5 ms重复请求，均须满足当前间隔。 */
     for (int every_poll = 0; every_poll <= 1; ++every_poll) {
         reset();
         unsigned frame = 0, starts = 0;
@@ -165,15 +167,15 @@ int main(void)
             int was_active = triggerOn;
             step(now);
             if (triggerOn && !was_active) {
-                if (starts) assert((TickType_t)(now - previous) >= 200U);
+                if (starts) assert((TickType_t)(now - previous) >= interval);
                 previous = now;
                 ++starts;
             }
         }
-        assert(starts == 50);
+        assert(starts == 9999U / interval + 1U);
     }
 
-    /* 手动单发、连发和反转仍沿用原逻辑，不受200 ms限制。 */
+    /* 手动单发、连发和反转仍沿用原逻辑，不受自瞄间隔限制。 */
     reset();
     automatic = 0;
     rc_data.rc.ch[4] = 100;
@@ -199,7 +201,7 @@ int main(void)
     rc_data.rc.ch[4] = -100;
     step(130);
     assert(triggerMode == TriggerMode_e_StuckSolve && wantedVTriggerMotor < 0);
-    puts("PASS: auto fire >=200ms / first shot / 41ms duration / no queue / mode and wheel toggles / mouse bypass / tick wrap / 24Hz and repeated frames / manual modes unchanged");
+    puts("PASS: configured auto fire interval / first shot / 41ms duration / no queue / mode and wheel toggles / mouse bypass / tick wrap / 24Hz and repeated frames / manual modes unchanged");
 }
 '''
     (OUT / 'test.c').write_text(prefix + timing + modes + globals_ + funcs + tests, encoding='utf-8')

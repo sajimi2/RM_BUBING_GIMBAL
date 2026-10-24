@@ -1,6 +1,7 @@
 #include "tuning_uart.h"
 #include "tuning_service.h"
 #include "usart.h"
+#include <string.h>
 
 #define RX_RING_SIZE 512U
 #define PARTIAL_FRAME_TIMEOUT_MS 100U
@@ -17,6 +18,7 @@ volatile uint32_t tuning_uart_rx_errors;
 volatile uint32_t tuning_uart_overflows;
 volatile uint32_t tuning_uart_tx_errors;
 static uint8_t tx_bytes[TUNING_FRAME_SIZE];
+static uint8_t pending_bytes[TUNING_FRAME_SIZE];
 static uint16_t tx_length;
 static tuning_parser_t parser;
 static tuning_message_t request;
@@ -63,6 +65,44 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *uart)
     }
 }
 
+static void queueTelemetry(uint32_t now)
+{
+    // 总发送关闭时，命令仍执行，但不生成周期遥测或命令回帧。
+    if (TUNING_VOFA_TX_ENABLED == 0)
+    {
+        return;
+    }
+
+    // 待发区独立于DMA区；来不及上传时保留最新快照，不积压过期观测。
+    tx_length = tuning_service_frame(pending_bytes);
+    last_stream_tick = now;
+}
+
+static void sendTelemetry(void)
+{
+    // 没有待发快照时不启动DMA。
+    if (tx_length == 0U)
+    {
+        return;
+    }
+    // 发送忙只影响上行；接收和命令执行已经在本轮完成。
+    if (huart6.gState != HAL_UART_STATE_READY)
+    {
+        return;
+    }
+
+    memcpy(tx_bytes, pending_bytes, tx_length);
+    if (HAL_UART_Transmit_DMA(&huart6, tx_bytes, tx_length) == HAL_OK)
+    {
+        tx_length = 0;
+    }
+    else
+    {
+        // 启动失败保留待发快照，下一轮重试，不阻塞新命令。
+        ++tuning_uart_tx_errors;
+    }
+}
+
 void tuning_uart_poll(void)
 {
     uint32_t key, now = HAL_GetTick();
@@ -86,17 +126,6 @@ void tuning_uart_poll(void)
         }
     }
 
-    /* DMA 持有 tx_bytes 期间不能改写。回复也不能被遥测覆盖。 */
-    if (huart6.gState != HAL_UART_STATE_READY)
-        return;
-    if (tx_length != 0U)
-    {
-        if (HAL_UART_Transmit_DMA(&huart6, tx_bytes, tx_length) == HAL_OK)
-            tx_length = 0;
-        else
-            ++tuning_uart_tx_errors;
-        return;
-    }
     // 超时后整行作废，不能让后半段碰巧成为有效参数命令。
     if (parser.count != 0U && now - rx_tick > PARTIAL_FRAME_TIMEOUT_MS)
         tuning_parser_discard(&parser);
@@ -114,25 +143,19 @@ void tuning_uart_poll(void)
         if (tuning_parser_feed(&parser, byte, &request))
         {
             tuning_service_request(&request);
-            tx_length = tuning_service_frame(tx_bytes);
-            // 命令回执就是一帧完整遥测；即便暂停了周期上传也会返回。
-            if (HAL_UART_Transmit_DMA(&huart6, tx_bytes, tx_length) == HAL_OK)
-                tx_length = 0;
-            else
-                ++tuning_uart_tx_errors;
-            last_stream_tick = now;
-            return;
+            queueTelemetry(now);
+            // 每轮仍只执行一条完整命令，保持原来的处理节奏。
+            break;
         }
     }
     period = tuning_service_period_ms();
-    if (period != 0U && now - last_stream_tick >= period)
+    // 命令快照优先发送，不被周期遥测替换；没有待发帧时才采集周期快照。
+    if (tx_length == 0U)
     {
-        tx_length = tuning_service_frame(tx_bytes);
-        // 本轮直接启动 DMA，避免额外等待一次 5 ms 轮询。
-        if (HAL_UART_Transmit_DMA(&huart6, tx_bytes, tx_length) == HAL_OK)
-            tx_length = 0;
-        else
-            ++tuning_uart_tx_errors;
-        last_stream_tick = now;
+        if (period != 0U && now - last_stream_tick >= period)
+        {
+            queueTelemetry(now);
+        }
     }
+    sendTelemetry();
 }

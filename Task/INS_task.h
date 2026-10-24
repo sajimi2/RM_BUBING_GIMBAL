@@ -69,6 +69,9 @@ extern INS_t INS;
 
 void INS_Init(void);
 void INS_Task(void);
+/* 最近一个完整1秒窗口的原始陀螺均值/总体标准差，单位rad/s。
+ * 诊断关闭或第一窗口完成前返回0；结果按X/Y/Z顺序，读取时保持六个值一致。 */
+void INS_GetGyroStats(float mean[3], float std[3]);
 void IMU_Temperature_Ctrl(void);
 
 void QuaternionUpdate(float *q, float gx, float gy, float gz, float dt);

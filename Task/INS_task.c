@@ -16,6 +16,7 @@
 #include "bsp_PWM.h"
 #include "math.h"
 #include "bsp_dwt.h"
+#include "tuning_config.h"
 
 INS_t INS;
 IMU_Param_t IMU_Param;
@@ -28,6 +29,110 @@ const float zb[3] = {0, 0, 1};
 uint32_t INS_DWT_Count = 0;
 static float dt = 0, t = 0;
 float RefTemp = 40;     //目标温度设置，防止温漂
+
+#if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
+// 原始陀螺诊断：窗口内只累加，满1秒才更新对外结果，不参与姿态计算。
+static uint32_t gyro_stats_count;
+static double gyro_stats_elapsed;
+static double gyro_stats_sum[3];
+static double gyro_stats_square_sum[3];
+static float gyro_stats_mean[3];
+static float gyro_stats_std[3];
+
+static void resetGyroStatsWindow(void)
+{
+    gyro_stats_count = 0;
+    gyro_stats_elapsed = 0;
+    for (uint8_t axis = 0; axis < 3; axis++)
+    {
+        gyro_stats_sum[axis] = 0;
+        gyro_stats_square_sum[axis] = 0;
+    }
+}
+
+/* 结算当前窗口；double累计减小平方和相减的舍入误差，结果仍用rad/s。 */
+static void publishGyroStats(void)
+{
+    float mean[3];
+    float std[3];
+    for (uint8_t axis = 0; axis < 3; axis++)
+    {
+        double average = gyro_stats_sum[axis] / gyro_stats_count;
+        double variance = gyro_stats_square_sum[axis] / gyro_stats_count;
+        variance -= average * average;
+        // 舍入可能让接近0的方差略小于0，不能直接对负数开方。
+        if (variance < 0)
+        {
+            variance = 0;
+        }
+        mean[axis] = (float)average;
+        std[axis] = sqrtf((float)variance);
+    }
+
+    // 计算放在临界区外；只在发布六个结果时短暂关中断。
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    for (uint8_t axis = 0; axis < 3; axis++)
+    {
+        gyro_stats_mean[axis] = mean[axis];
+        gyro_stats_std[axis] = std[axis];
+    }
+    __set_PRIMASK(key);
+}
+
+static void accumulateGyroStats(float sample_dt)
+{
+    // 无效时间不能用于累计窗口；只跳过诊断，不改变本周期INS处理。
+    if (!isfinite(sample_dt))
+    {
+        return;
+    }
+    // 启动时可能还没有有效时间差，等下一次正常采样。
+    if (sample_dt <= 0)
+    {
+        return;
+    }
+
+    gyro_stats_count++;
+    gyro_stats_elapsed += sample_dt;
+    for (uint8_t axis = 0; axis < 3; axis++)
+    {
+        double value = INS.Gyro[axis];
+        gyro_stats_sum[axis] += value;
+        gyro_stats_square_sum[axis] += value * value;
+    }
+
+    // 未满1秒时保留上个完整窗口，避免上传半个窗口的统计。
+    if (gyro_stats_elapsed < 1.0)
+    {
+        return;
+    }
+    publishGyroStats();
+    resetGyroStatsWindow();
+}
+#endif
+
+void INS_GetGyroStats(float mean[3], float std[3])
+{
+#if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
+    // 均值和标准差必须来自同一次结算，同时复制后恢复原中断状态。
+    uint32_t key = __get_PRIMASK();
+    __disable_irq();
+    for (uint8_t axis = 0; axis < 3; axis++)
+    {
+        mean[axis] = gyro_stats_mean[axis];
+        std[axis] = gyro_stats_std[axis];
+    }
+    __set_PRIMASK(key);
+#else
+    // 诊断关闭时没有统计开销；保留接口并明确返回0，不读取残留数据。
+    for (uint8_t axis = 0; axis < 3; axis++)
+    {
+        mean[axis] = 0;
+        std[axis] = 0;
+    }
+#endif
+}
 
 static void IMU_Param_Correction(IMU_Param_t *param, float gyro[3], float accel[3]);
 
@@ -68,6 +173,11 @@ void INS_Task(void)
     INS.Gyro[X]  = BMI088.Gyro[X];
     INS.Gyro[Y]  = BMI088.Gyro[Y];
     INS.Gyro[Z]  = BMI088.Gyro[Z];
+
+#if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
+    // 只观测安装修正和EKF之前的原始Gyro，不改写INS.Gyro。
+    accumulateGyroStats(dt);
+#endif
 
     // demo function,用于修正安装误差,可以不管,本demo暂时没用
     IMU_Param_Correction(&IMU_Param, INS.Gyro, INS.Accel);

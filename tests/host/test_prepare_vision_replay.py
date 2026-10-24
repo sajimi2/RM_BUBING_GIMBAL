@@ -28,6 +28,20 @@ with tempfile.TemporaryDirectory() as directory:
     data = json.loads(text.split('var recording = ', 1)[1].rstrip(';\n'))
     assert data['yawDeg'] == [2, -7, -7, 1]
     assert len(data['profiles']) == 1
+    # 新增的诊断列不改变目标列，也不能被误当作目标角使用。
+    diagnostics = directory / '23通道.csv'
+    with diagnostics.open('w', encoding='utf-8-sig', newline='') as stream:
+        writer = csv.writer(stream)
+        writer.writerow(header + ['诊断'] * 11)
+        writer.writerows([row + list(range(11)) for row in rows])
+    diagnostics_original = diagnostics.read_bytes()
+    header23, rows23, _ = module.read_recording(diagnostics)
+    assert len(header23) == 23 and rows23[0][12:] == list(range(11))
+    module.prepare(diagnostics, directory / 'diagnostics', 2, 5, 20)
+    text23 = (directory / 'diagnostics/recording.js').read_text(encoding='utf-8')
+    data23 = json.loads(text23.split('var recording = ', 1)[1].rstrip(';\n'))
+    assert data23['yawDeg'] == data['yawDeg']
+    assert diagnostics.read_bytes() == diagnostics_original
     profiles = [{'name': '测试片段', 'firstRow': 3, 'lastRow': 5}]
     module.prepare(source, directory / 'profile', 2, 5, 20, profiles, 'Kp=0.012，前馈0')
     text = (directory / 'profile/recording.js').read_text(encoding='utf-8')
@@ -47,4 +61,4 @@ with tempfile.TemporaryDirectory() as directory:
         except ValueError:
             pass
 
-print('PASS: inclusive range / zero and repeated values preserved / exact jumps / source unchanged / invalid settings')
+print('PASS: 12 and 23 channels / unchanged target column / inclusive range / zero and repeated values preserved / exact jumps / source unchanged / invalid settings')

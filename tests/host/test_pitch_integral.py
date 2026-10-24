@@ -425,8 +425,9 @@ static void setup_fire(void)
 {
     setup_default();
     test_auto = 1;
-    fire_yaw_half_m = FIRE_YAW_HALF_M_DEFAULT;
-    fire_pitch_half_m = FIRE_PITCH_HALF_M_DEFAULT;
+    /* 这些用例按下文明确的47/43 mm测试阈值公式，不依赖实车调试默认半宽。 */
+    fire_yaw_half_m = 0.047f;
+    fire_pitch_half_m = 0.043f;
     fire_spread_rad = 0; /* 显式设0，不依赖工程里正在调的散布角；散布角单独有用例 */
     fire_min_rad = FIRE_MIN_RAD_DEFAULT;
     fire_max_rad = FIRE_MAX_RAD_DEFAULT;

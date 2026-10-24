@@ -189,7 +189,7 @@ static uint8_t execute_command(uint8_t id, const float *values)
         gimbal_tuning_stop_yaw_wave();
         return TUNING_OK;
     case CMD_STREAM:
-        // 十二通道共52字节，5 ms约占90%带宽；30 Hz测试不能仍用50 Hz观察。
+        // 默认12通道52字节；附加诊断23通道96字节时应使用20 ms上传。
         if (value != truncf(value))
             return TUNING_BAD_PARAMETER;
         if (value != 0.0f && (value < 5.0f || value > 2000.0f))
@@ -272,6 +272,22 @@ uint16_t tuning_service_frame(uint8_t output[TUNING_FRAME_SIZE])
     channels[9] = state.fire_gate.yaw_threshold_rad;
     channels[10] = state.fire_gate.pitch_error_rad;
     channels[11] = state.fire_gate.pitch_threshold_rad;
+
+#if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
+    // 新增诊断通道只读快照；I0～I11的编号和单位保持原样。
+    channels[12] = state.pitch_encoder_angle_rad * RAD_TO_DEG;
+    channels[13] = (float)state.remote_left_switch;
+    channels[14] = (float)state.friction_enabled;
+    channels[15] = (float)state.friction_speed_rpm[0];
+    channels[16] = (float)state.friction_speed_rpm[1];
+    // 原始Gyro统计来自同一个完整1秒窗口，上传时才把rad/s换成°/s。
+    channels[17] = state.gyro_mean_rad_s[0] * 57.2958f;
+    channels[18] = state.gyro_mean_rad_s[1] * 57.2958f;
+    channels[19] = state.gyro_mean_rad_s[2] * 57.2958f;
+    channels[20] = state.gyro_std_rad_s[0] * 57.2958f;
+    channels[21] = state.gyro_std_rad_s[1] * 57.2958f;
+    channels[22] = state.gyro_std_rad_s[2] * 57.2958f;
+#endif
 
     // Inf会被误认作帧尾；仅过滤上传值，不改变控制数据。
     for (i = 0; i < TUNING_CHANNEL_COUNT; ++i)

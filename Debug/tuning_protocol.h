@@ -2,9 +2,14 @@
 #define TUNING_PROTOCOL_H
 
 #include <stdint.h>
+#include "tuning_config.h"
 
-/* 上行：12 个小端 float + JustFloat 帧尾。下行：VOFA Str 命令，以换行结束。 */
+/* 上行：默认12通道，开启附加诊断后23通道；末尾均为JustFloat帧尾。 */
+#if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
+#define TUNING_CHANNEL_COUNT 23U
+#else
 #define TUNING_CHANNEL_COUNT 12U
+#endif
 #define TUNING_FRAME_SIZE (4U * TUNING_CHANNEL_COUNT + 4U)
 #define TUNING_LINE_SIZE 96U
 #define TUNING_NAME_SIZE 24U

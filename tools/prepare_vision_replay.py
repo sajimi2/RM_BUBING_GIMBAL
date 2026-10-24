@@ -24,15 +24,17 @@ def read_recording(path):
     expected = ['Pitch', 'Pitch', 'Yaw', 'Yaw']
     if len(records) < 2:
         raise ValueError('记录没有数据行')
-    if len(records[0]) != 12:
-        raise ValueError('表头应为12通道')
+    # 新版只在原12列后追加诊断，Yaw目标仍读取第4列。
+    channel_count = len(records[0])
+    if channel_count not in (12, 23):
+        raise ValueError('表头应为12或23通道')
     for index, name in enumerate(expected):
         if name not in records[0][index]:
             raise ValueError('前四列应为Pitch实际/目标角、Yaw实际/目标角，单位为度')
     rows = []
     for number, record in enumerate(records[1:], 1):
-        if len(record) != 12:
-            raise ValueError(f'数据行{number}不是12通道')
+        if len(record) != channel_count:
+            raise ValueError(f'数据行{number}的通道数与表头不一致')
         values = [float(value) for value in record]
         for value in values:
             if not math.isfinite(value):

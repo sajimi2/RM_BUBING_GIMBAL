@@ -97,7 +97,7 @@
 #define YAW_FF_FRICTION_MIN_SPEED      0.087f  // 约5°/s，目标比这慢时不加摩擦项，避免视觉抖动让方向来回翻
 #define YAW_FF_OUT_MAX                 10000.0f // 输出前馈自身限幅
 #define YAW_FF_SPEED_MAX               10.0f   // 估算的目标角速度超过约573°/s视为数据错误，按0处理
-#define YAW_FF_FRAME_DT_MIN_MS         10U     // 两帧间隔小于它（重复帧或成串到达），不拿来估速度
+#define YAW_FF_FRAME_DT_MIN_MS         30U     // 两帧间隔小于它（重复帧或成串到达），不拿来估速度
 #define YAW_FF_FRAME_DT_MAX_MS         100U    // 两帧间隔大于它（中间断过）S，速度按0重新开始
 #define YAW_FF_INTERP_MAX_MS           50U     // 帧间插值最多往前推这么久，约比一帧（42 ms）多一点
 
@@ -708,6 +708,29 @@ static uint8_t gimbal_tuning_is_enabled(void)
            (robotIsAuto() || rc_p->rc.s[1] == 2);
 }
 
+#if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
+/* 只采集观测值；由快照函数在已有临界区内调用，不写控制状态。 */
+static void getTuningDiagnostics(pitch_tuning_state_t *state)
+{
+    state->pitch_encoder_angle_rad = 0;
+    // 调参任务可能早于云台初始化，编码器指针就绪后才读取。
+    if (PitchCtrl.ECDPoint != NULL)
+    {
+        state->pitch_encoder_angle_rad = ECD2Rad(*PitchCtrl.ECDPoint);
+    }
+
+    const RC_ctrl_t *remote = get_remote_control_point();
+    state->remote_left_switch = remote->rc.s[1];
+    state->friction_enabled = get_fric();
+    for (uint8_t motor = 0; motor < 2; motor++)
+    {
+        const motor_measure_t *measure = get_shoot_motor_measure_point(motor);
+        state->friction_speed_rpm[motor] = measure->speed_rpm;
+    }
+    INS_GetGyroStats(state->gyro_mean_rad_s, state->gyro_std_rad_s);
+}
+#endif
+
 void gimbal_tuning_get_state(pitch_tuning_state_t *state)
 {
     uint32_t key = __get_PRIMASK();
@@ -729,6 +752,9 @@ void gimbal_tuning_get_state(pitch_tuning_state_t *state)
     state->yaw.target_speed_rad_s = yaw_speed_setpoint * 1000.0f; // 位置环输出 + 速度前馈
     state->yaw.speed_rad_s = YawCtrl.radspeed * 1000.0f;
     state->yaw.motor_cmd = YawCtrl.Volt_out;
+#if TUNING_DIAGNOSTICS_ENABLED && TUNING_VOFA_TX_ENABLED
+    getTuningDiagnostics(state);
+#endif
     __set_PRIMASK(key);
 }
 
