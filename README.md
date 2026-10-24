@@ -1,5 +1,7 @@
 # BubinGimbalV1.0
 
+新增[实测视觉Yaw重放](tools/vofa/VISION_REPLAY.md)：当前基准为2026-10-23的vofa+5记录（用户确认0前馈、Yaw位置环Kp=0.012），提取数据行134～2757，约52.48秒，支持幅度缩放。旧vofa+3数据已弃用归档。控件与原正弦控件并存，仅用现有串口只瞄准命令，无需重新烧录；采样周期20 ms为估计值。
+
 当前调参工具为 **VOFA+ 直接连接 DAP 串口**，无需网页后台。JustFloat上传12个通道：原I0～I7保留Pitch实际/目标角、Yaw实际/目标角、Yaw最终PID输出、视觉CAN接收在线标志，以及Yaw目标/实际速度（°/s）；I8～I11追加Yaw误差、Yaw阈值、Pitch误差、Pitch阈值（均为rad）。默认20 ms上传，VOFA的Δt设为20 ms。原有Gain、Offset、Ki和Pitch目标下行命令保留。配置方法及门控提前返回时的零值说明见 [VOFA_TUNING.md](VOFA_TUNING.md)。原网页及其二进制协议资料保留供历史查阅，不再连接当前固件。
 
 VOFA串口收发由独立的`Task/vofa_task.c`任务处理，CubeMX的ioc中登记为`vofaTask`。云台、IMU、发射等原有任务手动创建于`Src/freertos.c`的用户代码区，因此不在CubeMX任务表中显示。具体说明见[任务说明](VOFA_TUNING.md#在cubemx里看任务)。

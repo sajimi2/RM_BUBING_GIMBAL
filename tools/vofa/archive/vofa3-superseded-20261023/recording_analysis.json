@@ -1,0 +1,185 @@
+{
+  "source": "C:\\Users\\21775\\Desktop\\vofa+3_31023-40329.csv",
+  "source_sha256": "634512f1eca615571b7c4a38594fec8f01ec1f2e39efbb1cc8d85cdcc7a151dc",
+  "source_rows": 9307,
+  "selected_first_data_row": 346,
+  "selected_last_data_row": 2005,
+  "selected_samples": 1660,
+  "estimated_sample_ms": 20,
+  "estimated_duration_s": 33.2,
+  "yaw_target_column": "Yaw 目标角(°)",
+  "yaw_target_min_deg": -16.875517,
+  "yaw_target_max_deg": 1.18656,
+  "max_observed_step_deg": 8.976105,
+  "median_nonzero_step_deg": 1.939144999999999,
+  "observed_target_changes": 551,
+  "requested_send_interval_ms": 42,
+  "changes_after_42ms_resampling": 510,
+  "max_step_after_42ms_resampling_deg": 9.107945,
+  "can_offline_samples": 139,
+  "gate_threshold_zero_samples": 138,
+  "selected_time_fit": {
+    "estimated_ms": 20.703469276438742,
+    "pairs": 1464
+  },
+  "blocks": [
+    {
+      "estimated_ms": 21.321676497768642,
+      "pairs": 139,
+      "first_row": 1,
+      "last_row": 500,
+      "yaw_min_deg": -12.44789,
+      "yaw_max_deg": -1.917173
+    },
+    {
+      "estimated_ms": 20.714094773335486,
+      "pairs": 454,
+      "first_row": 501,
+      "last_row": 1000,
+      "yaw_min_deg": -15.139623,
+      "yaw_max_deg": 1.18656
+    },
+    {
+      "estimated_ms": 20.629647653390784,
+      "pairs": 428,
+      "first_row": 1001,
+      "last_row": 1500,
+      "yaw_min_deg": -16.875517,
+      "yaw_max_deg": 0.950346
+    },
+    {
+      "estimated_ms": 20.598964527895326,
+      "pairs": 436,
+      "first_row": 1501,
+      "last_row": 2000,
+      "yaw_min_deg": -14.683675,
+      "yaw_max_deg": 0.664693
+    },
+    {
+      "estimated_ms": 23.30195335860218,
+      "pairs": 5,
+      "first_row": 2001,
+      "last_row": 2500,
+      "yaw_min_deg": -9.684744,
+      "yaw_max_deg": -5.103715
+    },
+    {
+      "estimated_ms": 5.007284795585513,
+      "pairs": 332,
+      "first_row": 2501,
+      "last_row": 3000,
+      "yaw_min_deg": -8.464161,
+      "yaw_max_deg": -2.472211
+    },
+    {
+      "estimated_ms": 5.00773819956617,
+      "pairs": 479,
+      "first_row": 3001,
+      "last_row": 3500,
+      "yaw_min_deg": -8.464161,
+      "yaw_max_deg": -2.472212
+    },
+    {
+      "estimated_ms": 5.036500730623802,
+      "pairs": 290,
+      "first_row": 3501,
+      "last_row": 4000,
+      "yaw_min_deg": -8.464161,
+      "yaw_max_deg": -2.472212
+    },
+    {
+      "estimated_ms": 5.142150056841255,
+      "pairs": 257,
+      "first_row": 4001,
+      "last_row": 4500,
+      "yaw_min_deg": -10.928736,
+      "yaw_max_deg": -0.942153
+    },
+    {
+      "estimated_ms": 5.139161055836781,
+      "pairs": 463,
+      "first_row": 4501,
+      "last_row": 5000,
+      "yaw_min_deg": -10.928738,
+      "yaw_max_deg": -0.942154
+    },
+    {
+      "estimated_ms": 5.15062904720292,
+      "pairs": 373,
+      "first_row": 5001,
+      "last_row": 5500,
+      "yaw_min_deg": -10.928732,
+      "yaw_max_deg": -0.942154
+    },
+    {
+      "estimated_ms": null,
+      "pairs": 0,
+      "first_row": 5501,
+      "last_row": 6000,
+      "yaw_min_deg": -5.312292,
+      "yaw_max_deg": -5.312292
+    },
+    {
+      "estimated_ms": 5.073647494479356,
+      "pairs": 432,
+      "first_row": 6001,
+      "last_row": 6500,
+      "yaw_min_deg": -9.808216,
+      "yaw_max_deg": 0.147421
+    },
+    {
+      "estimated_ms": 5.078423557317472,
+      "pairs": 463,
+      "first_row": 6501,
+      "last_row": 7000,
+      "yaw_min_deg": -9.808228,
+      "yaw_max_deg": 0.147429
+    },
+    {
+      "estimated_ms": 5.122364094222664,
+      "pairs": 398,
+      "first_row": 7001,
+      "last_row": 7500,
+      "yaw_min_deg": -9.808242,
+      "yaw_max_deg": 0.147439
+    },
+    {
+      "estimated_ms": 5.073341301472005,
+      "pairs": 340,
+      "first_row": 7501,
+      "last_row": 8000,
+      "yaw_min_deg": -5.640716,
+      "yaw_max_deg": 0.332665
+    },
+    {
+      "estimated_ms": 5.067969540279991,
+      "pairs": 469,
+      "first_row": 8001,
+      "last_row": 8500,
+      "yaw_min_deg": -5.64072,
+      "yaw_max_deg": 0.332669
+    },
+    {
+      "estimated_ms": 5.066071319043371,
+      "pairs": 475,
+      "first_row": 8501,
+      "last_row": 9000,
+      "yaw_min_deg": -5.640728,
+      "yaw_max_deg": 0.332678
+    },
+    {
+      "estimated_ms": 7.195000583094017,
+      "pairs": 8,
+      "first_row": 9001,
+      "last_row": 9307,
+      "yaw_min_deg": -4.181261,
+      "yaw_max_deg": 0.309053
+    }
+  ],
+  "limits": [
+    "无硬件时间戳，周期由角度/速度交叉估计，不能还原精确CAN收帧时间。",
+    "读取控制实际采用的目标角；若录制时开了插值，无法从本CSV恢复原始视觉帧。",
+    "默认只提取前段不规则活动区，排除后面规则摆动和长时间静止区。",
+    "发送时约24Hz零阶保持取样；重复帧、原始fire/rev、打弹反冲不在重放中。"
+  ]
+}

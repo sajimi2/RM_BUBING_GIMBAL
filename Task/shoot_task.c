@@ -29,7 +29,7 @@
 
 static TickType_t shootOneStartTime = 0;
 #define SHOOT_ONE_DURATION_TICKS pdMS_TO_TICKS(41)  // 单次拨弹持续41 ms
-#define AUTO_FIRE_MIN_INTERVAL_TICKS pdMS_TO_TICKS(250) // 自瞄两次拨弹启动至少间隔200 ms
+#define AUTO_FIRE_MIN_INTERVAL_TICKS pdMS_TO_TICKS(250) // 自瞄两次拨弹启动至少间隔250 ms
 static TickType_t autoFireLastStartTime;
 static uint8_t autoFireHasStarted;
 
@@ -163,7 +163,7 @@ static void fricModeChange(void)
 	fricOn = 0;
 
 	// 第一步：先按遥控器决定摩擦轮开不开（和原来的逻辑一样）
-	if (trigger_state == 1)          // 左拨杆打上：开
+	if (trigger_state == 1)          // 左拨杆打上：手瞄发弹，开
 	{
 		fricOn = 1;
 	}

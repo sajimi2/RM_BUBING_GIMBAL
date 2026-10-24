@@ -88,8 +88,8 @@
 /* 速度前馈：速度环目标 = 位置环输出 + 增益 × 目标角速度。
  * 输出前馈：电机输出 += 增益 × (惯量 × 目标角加速度 + 速度项 × 目标角速度 + 摩擦 × 运动方向)。
  * 两个增益默认0即关闭；模型参数来自VOFA数据回归，单位按rad/s、rad/s²，需实车再调。 */
-#define YAW_FF_SPEED_GAIN_DEFAULT      0.0f    // 速度前馈增益，默认关闭，调到1为完全前馈
-#define YAW_FF_OUT_GAIN_DEFAULT        0.0f    // 输出前馈增益，默认关闭
+#define YAW_FF_SPEED_GAIN_DEFAULT      0.7f    // 速度前馈增益，调到1为完全前馈
+#define YAW_FF_OUT_GAIN_DEFAULT        0.0f    // 输出前馈增益
 #define YAW_FF_GAIN_MAX                2.0f    // 增益超过它视为填错，按关闭处理
 #define YAW_FF_INERTIA_DEFAULT         200.0f  // 惯量项：每1 rad/s²需要的输出（回归约3.5 / (°/s²)）
 #define YAW_FF_BACK_EMF_DEFAULT        1100.0f // 速度项：每1 rad/s需要的输出（回归约20 / (°/s)，反电动势加粘滞）
@@ -98,14 +98,14 @@
 #define YAW_FF_OUT_MAX                 10000.0f // 输出前馈自身限幅
 #define YAW_FF_SPEED_MAX               10.0f   // 估算的目标角速度超过约573°/s视为数据错误，按0处理
 #define YAW_FF_FRAME_DT_MIN_MS         10U     // 两帧间隔小于它（重复帧或成串到达），不拿来估速度
-#define YAW_FF_FRAME_DT_MAX_MS         100U    // 两帧间隔大于它（中间断过），速度按0重新开始
+#define YAW_FF_FRAME_DT_MAX_MS         100U    // 两帧间隔大于它（中间断过）S，速度按0重新开始
 #define YAW_FF_INTERP_MAX_MS           50U     // 帧间插值最多往前推这么久，约比一帧（42 ms）多一点
 
 // 开火门控：视觉允许开火、视觉帧没过期、云台已对准且保持一小段时间，才允许拨弹
 /* 允许误差（rad）= 允许偏离的半宽（m）/ 距离（m）- 散布角（rad），再做上下限。
  * 半宽 = 装甲板实测半宽 × 0.7余量；视觉预测误差和散布也会让弹丸偏，所以不用满。 */
-#define FIRE_YAW_HALF_M_DEFAULT    0.047f  // 横宽13.5cm的一半6.75cm × 0.7
-#define FIRE_PITCH_HALF_M_DEFAULT  0.043f  // 竖向投影约12.3cm的一半6.15cm × 0.7
+#define FIRE_YAW_HALF_M_DEFAULT    0.0675f  // 装甲板横宽13.5cm的一半6.75cm
+#define FIRE_PITCH_HALF_M_DEFAULT  0.0615f  // 装甲板竖向投影约12.3cm的一半6.15cm
 #define FIRE_SPREAD_RAD_DEFAULT    0.006f    // 发射散布角，实测前先为0
 #define FIRE_MIN_RAD_DEFAULT       0.0052f // 约0.3°，算出来比它还小说明太远打不准，不开火
 #define FIRE_MAX_RAD_DEFAULT       0.0224f // 约1.28°，算出来比它还大说明太近打不准，不开火
@@ -1053,6 +1053,7 @@ static fp32 checkFeedforwardGain(fp32 gain)
  */
 static fp32 calcYawSpeedFeedforward(void)
 {
+    // 对要乘的gain作保护
     const fp32 gain = checkFeedforwardGain(yaw_ff_speed_gain);
     // 目标角速度是rad/s，速度环内部用rad/ms，除以1000
     const fp32 speedFf = gain * yaw_target_speed * 0.001f;

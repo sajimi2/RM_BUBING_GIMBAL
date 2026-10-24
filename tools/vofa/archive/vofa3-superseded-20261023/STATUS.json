@@ -1,0 +1,10 @@
+{
+  "status": "superseded_do_not_use_for_tuning",
+  "reason": "User reports vision commands were affected by incorrect overshooting gimbal feedback.",
+  "replaced_by": "vofa+5_37436-40329.csv",
+  "new_baseline_user_reported": {
+    "yaw_angle_kp": 0.012,
+    "speed_feedforward_gain": 0,
+    "output_feedforward_gain": 0
+  }
+}

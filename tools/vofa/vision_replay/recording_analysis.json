@@ -1,0 +1,91 @@
+{
+  "source": "C:\\Users\\21775\\Desktop\\vofa+5_37436-40329.csv",
+  "source_sha256": "f59e73b834166ecf9be9c5a84a7a2c3d822a55cf1ce1921281f9356527efc57a",
+  "baseline_label": "新基准：0前馈，Yaw位置环Kp=0.012",
+  "source_rows": 2894,
+  "selected_first_data_row": 134,
+  "selected_last_data_row": 2757,
+  "selected_samples": 2624,
+  "estimated_sample_ms": 20.0,
+  "estimated_duration_s": 52.48,
+  "yaw_target_column": "Yaw 目标角(°)",
+  "yaw_target_min_deg": -21.275673,
+  "yaw_target_max_deg": -1.439253,
+  "max_observed_step_deg": 9.063998000000002,
+  "median_nonzero_step_deg": 1.2799449999999997,
+  "observed_target_changes": 1049,
+  "requested_send_interval_ms": 42,
+  "changes_after_42ms_resampling": 993,
+  "max_step_after_42ms_resampling_deg": 9.063998000000002,
+  "can_offline_samples": 14,
+  "gate_threshold_zero_samples": 26,
+  "selected_time_fit": {
+    "estimated_ms": 19.85400246671365,
+    "pairs": 1454
+  },
+  "tracking": {
+    "online_samples": 2610,
+    "rms_error_deg": 2.2630591415388266,
+    "median_abs_error_deg": 1.4112465000000043,
+    "max_abs_error_deg": 10.767206999999985,
+    "motor_saturated_samples": 0,
+    "target_speed_error_fit_kp_ms": 0.012000000165696956,
+    "target_speed_fit_residual_rms_deg_s": 6.698058389587349e-06
+  },
+  "blocks": [
+    {
+      "estimated_ms": 20.476487658381394,
+      "pairs": 263,
+      "first_row": 1,
+      "last_row": 500,
+      "yaw_min_deg": -21.275673,
+      "yaw_max_deg": 11.250343
+    },
+    {
+      "estimated_ms": 19.3468949398781,
+      "pairs": 205,
+      "first_row": 501,
+      "last_row": 1000,
+      "yaw_min_deg": -16.507462,
+      "yaw_max_deg": -6.169012
+    },
+    {
+      "estimated_ms": 19.353652639722576,
+      "pairs": 273,
+      "first_row": 1001,
+      "last_row": 1500,
+      "yaw_min_deg": -17.633595,
+      "yaw_max_deg": -1.439253
+    },
+    {
+      "estimated_ms": 20.065964537465437,
+      "pairs": 292,
+      "first_row": 1501,
+      "last_row": 2000,
+      "yaw_min_deg": -19.336529,
+      "yaw_max_deg": -2.702719
+    },
+    {
+      "estimated_ms": 19.666053108006363,
+      "pairs": 302,
+      "first_row": 2001,
+      "last_row": 2500,
+      "yaw_min_deg": -16.661276,
+      "yaw_max_deg": -4.823145
+    },
+    {
+      "estimated_ms": 17.31362047486153,
+      "pairs": 117,
+      "first_row": 2501,
+      "last_row": 2894,
+      "yaw_min_deg": -15.683463,
+      "yaw_max_deg": -6.190985
+    }
+  ],
+  "limits": [
+    "无硬件时间戳，周期由角度/速度交叉估计，不能还原精确CAN收帧时间。",
+    "读取控制实际采用的目标角；若录制时开了插值，无法从本CSV恢复原始视觉帧。",
+    "只使用指定片段；采集条件由用户说明，CSV没有前馈/插值开关的硬件读回。",
+    "发送时约24Hz零阶保持取样；重复帧、原始fire/rev、打弹反冲不在重放中。"
+  ]
+}

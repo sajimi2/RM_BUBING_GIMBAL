@@ -29,6 +29,11 @@ void reset_task(void const * argument)
 				NVIC_SystemReset();
 			}
 		}
+		else
+		{
+			satisfy_count = 0;
+			//没有else这个右摇杆右上重启的计时就是累计的
+		}
 		osDelay(100);
 	}
 }
