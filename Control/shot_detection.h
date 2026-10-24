@@ -3,9 +3,10 @@
 
 #include <stdint.h>
 
-/* 实测稳态约8400 rpm、出弹谷底约8000～8150 rpm；这些值是首轮检测参数。 */
+/* 用原始rpm判断局部峰谷，VOFA显示增益和偏置不参与检测。 */
 #define SHOT_DETECTION_DROP_RPM 200.0f
-#define SHOT_DETECTION_RECOVER_RPM 80.0f
+#define SHOT_DETECTION_RECOVER_RPM 150.0f // 从当前谷底回升此幅度后允许下一次检测
+#define SHOT_DETECTION_STABLE_BAND_RPM 80.0f
 #define SHOT_DETECTION_MIN_RPM 7000.0f
 #define SHOT_DETECTION_STABLE_MS 100U
 #define SHOT_DETECTION_FLAG_MS 50U
@@ -13,7 +14,8 @@
 /* 只保存检测内部状态，不作为电机控制输入。 */
 typedef struct
 {
-    float baseline_rpm;
+    float peak_rpm;   // 当前下降段的局部参考峰值，不要求回到开轮时的空载转速
+    float trough_rpm; // 当前下凹的最低值，用于局部回升判定
     float stable_min_rpm;
     float stable_max_rpm;
     uint32_t stable_since_ms;

@@ -1,4 +1,4 @@
-"""编译真实自瞄拨弹入口和状态机，验证当前配置的最小间隔；不连接硬件。"""
+"""编译真实拨弹状态机，验证自瞄间隔和手瞄连发脉冲上限；不连接硬件。"""
 from pathlib import Path
 import os
 import re
@@ -10,7 +10,7 @@ OUT = ROOT / 'build/host-auto-fire-interval'
 
 
 def function(source, name):
-    match = re.search(r'^(?:static void|void static|void|uint8_t) ' + name + r'\([^;]*?\)\s*\{', source, re.M)
+    match = re.search(r'^(?:static void|void static|void|static uint8_t|uint8_t) ' + name + r'\([^;]*?\)\s*\{', source, re.M)
     assert match, name
     end, depth = match.end(), 1
     while depth:
@@ -49,6 +49,7 @@ static float wantedVShootMotor[2], wantedVTriggerMotor;
     globals_ = '\nstatic enum TriggerMode_e triggerMode;\n'
     funcs = '\n'.join(function(source, name) for name in (
         'getInstruction', 'fricModeChange', 'tryStartAutoShot',
+        'manualBurstRequested', 'updateManualBurst',
         'triggerModeChange', 'initShootModes', 'setSpeed', 'shoot_is_feeding_forward'))
     tests = r'''
 static void step(TickType_t now)
@@ -184,7 +185,7 @@ int main(void)
         assert(starts == 9999U / interval + 1U);
     }
 
-    /* 手动单发、连发和反转仍沿用原逻辑，不受自瞄间隔限制。 */
+    /* 手动单发和反转不受自瞄间隔限制，手瞄连发只在脉冲内给正向目标。 */
     reset();
     automatic = 0;
     rc_data.rc.ch[4] = 100;
@@ -217,7 +218,88 @@ int main(void)
     source = NX_SOURCE_UART;
     step(0);
     assert(!fricOn && shoot_is_feeding_forward() == 0);
-    puts("PASS: configured auto fire interval / first shot / 41ms duration / no queue / mode and wheel toggles / mouse bypass / tick wrap / 24Hz and repeated frames / manual modes unchanged");
+    /* 遥控连发：首发立即启动，单次41 ms，启动到启动至少间隔200 ms。 */
+    const TickType_t manual_interval = MANUAL_BURST_MIN_INTERVAL_TICKS;
+    assert(manual_interval == 200U);
+    reset();
+    automatic = gate = 0;
+    rc_data.rc.ch[4] = 500;
+    step(0);
+    assert(triggerOn && manualBurstLastStartTime == 0);
+    step(40);
+    assert(triggerOn);
+    step(45);
+    assert(!triggerOn && wantedVTriggerMotor == 0);
+    step(manual_interval - 1);
+    assert(!triggerOn);
+    step(manual_interval);
+    assert(triggerOn && manualBurstLastStartTime == manual_interval);
+    rc_data.rc.ch[4] = 0;
+    step(manual_interval + 5);
+    assert(!triggerOn); /* 松开在下一次5 ms轮询立即停，不等本脉冲结束。 */
+    rc_data.rc.ch[4] = 500;
+    step(manual_interval + 10);
+    assert(!triggerOn); /* 快速松开再按，不续接刚才被打断的脉冲。 */
+    step(2 * manual_interval);
+    assert(triggerOn);
+    rc_data.rc.s[1] = 3;
+    step(2 * manual_interval + 5);
+    assert(!triggerOn && !fricOn);
+    rc_data.rc.s[1] = 2;
+    step(2 * manual_interval + 10);
+    assert(!triggerOn);
+    automatic = 1;
+    step(2 * manual_interval + 15);
+    automatic = 0;
+    step(2 * manual_interval + 20);
+    assert(!triggerOn); /* 开关轮和切换模式均不重置手瞄连发间隔。 */
+    step(3 * manual_interval);
+    assert(triggerOn);
+
+    /* 鼠标左键与拨轮共用限速；同时按下、反复点击都不能生成更密的连发脉冲。 */
+    for (unsigned input = 0; input < 4; ++input) {
+        reset();
+        automatic = gate = 0;
+        unsigned starts = 0;
+        TickType_t previous = 0;
+        for (unsigned now = 0; now < 2000; now += 5) {
+            rc_data.rc.ch[4] = 0;
+            rc_data.mouse.press_l = 0;
+            if (input == 0 || input == 2) rc_data.rc.ch[4] = 500;
+            if (input == 1 || input == 2) rc_data.mouse.press_l = 1;
+            if (input == 3) rc_data.mouse.press_l = (now % 10 == 0);
+            int was_active = triggerOn;
+            step(now);
+            if (triggerOn && !was_active) {
+                if (starts) assert((TickType_t)(now - previous) >= manual_interval);
+                previous = now;
+                ++starts;
+            }
+        }
+        assert(starts == 10);
+    }
+    /* 鼠标仍按住时，反转请求优先退出连发并进入原解堵逻辑。 */
+    rc_data.rc.ch[4] = -100;
+    step(2000);
+    step(2005);
+    assert(triggerMode == TriggerMode_e_StuckSolve && wantedVTriggerMotor < 0);
+
+    reset();
+    automatic = gate = 0;
+    rc_data.rc.ch[4] = 500;
+    TickType_t manual_first = UINT32_MAX - 99U;
+    step(manual_first);
+    assert(triggerOn);
+    step(manual_first + 45U);
+    step(manual_first + manual_interval - 1U);
+    assert(!triggerOn);
+    step(manual_first + manual_interval);
+    assert(triggerOn); /* 手瞄间隔也支持tick回绕。 */
+    step(manual_first + manual_interval + 1000U);
+    assert(triggerOn && manualBurstLastStartTime == (TickType_t)(manual_first + manual_interval + 1000U));
+    step(manual_first + manual_interval + 1005U);
+    assert(triggerOn); /* 长时间未调度后只启动当前一发，不补发历史请求。 */
+    puts("PASS: auto interval unchanged / manual wheel and mouse max 5 starts per second / 41ms pulses / release and repress / wheel and mode toggles / reverse priority / no queue / tick wrap / manual single unchanged");
 }
 '''
     (OUT / 'test.c').write_text(prefix + timing + modes + globals_ + funcs + tests, encoding='utf-8')

@@ -32,8 +32,14 @@
 static TickType_t shootOneStartTime = 0;
 #define SHOOT_ONE_DURATION_TICKS pdMS_TO_TICKS(41)  // 单次拨弹持续41 ms
 #define AUTO_FIRE_MIN_INTERVAL_TICKS pdMS_TO_TICKS(250) // 自瞄两次拨弹启动至少间隔250 ms
+// 手瞄连发上限：200 ms为每秒最多启动5次拨弹；改为250 ms则为4次。
+#define MANUAL_BURST_INTERVAL_MS 200U
+#define MANUAL_BURST_MIN_INTERVAL_TICKS pdMS_TO_TICKS(MANUAL_BURST_INTERVAL_MS)
 static TickType_t autoFireLastStartTime;
 static uint8_t autoFireHasStarted;
+static TickType_t manualBurstLastStartTime;
+static uint8_t manualBurstHasStarted;
+static uint8_t manualBurstOn;
 
 #define TRIGGER_ROUNDS_FOR_A_BULLET_A 7
 #define TRIGGER_ROUNDS_FOR_A_BULLET_B 8
@@ -69,7 +75,7 @@ const static fp32 trigger_motor_speed_pid[3] = {M2006_MOTOR_SPEED_PID_KP, M2006_
 enum TriggerMode_e{
     TriggerMode_e_Stop,         //停止发射
     TriggerMode_e_ShootOne,     //发射一个，靠拨弹轮减速前的电机转4圈。对应弹盘轮子转一格
-    TriggerMode_e_ShootMulti,   //多发，其实是等待进入发射一个的状态
+    TriggerMode_e_ShootMulti,   // 手瞄连发：按最小间隔重复单次拨弹，不持续转动
 	TriggerMode_e_StuckSolve,
 };
 
@@ -107,6 +113,8 @@ void setSpeed(void);
 static void calcCurrent(void);
 static void getShootMotorSpeed(void);
 static void tryStartAutoShot(TickType_t now);
+static uint8_t manualBurstRequested(void);
+static void updateManualBurst(TickType_t now);
 static void updateShotDetection(void);
 
 void shoot_task(void const *pvParameters)
@@ -224,6 +232,55 @@ static void tryStartAutoShot(TickType_t now)
     autoFireHasStarted = 1;
 }
 
+/* 鼠标左键和遥控拨轮都属于手瞄连发；反转操作优先退出连发。 */
+static uint8_t manualBurstRequested(void)
+{
+    // 反转解堵不能被按住的鼠标左键覆盖。
+    if (wheel < -50)
+    {
+        return 0;
+    }
+    // 遥控拨轮进入连发区间。
+    if (wheel > 400)
+    {
+        return 1;
+    }
+    // 鼠标左键按住时也沿用相同的限速。
+    if (rc_p->mouse.press_l == 1)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+/* 从每次实际拨弹启动计200 ms间隔，首发立即执行，松开再按也不重置冷却。 */
+static void updateManualBurst(TickType_t now)
+{
+    TickType_t elapsed = now - manualBurstLastStartTime;
+    // 本次拨弹尚未结束，保持原41 ms动作，不因为重复请求而延长。
+    if (manualBurstOn)
+    {
+        // 还在本次拨弹持续时间内，保留当前脉冲。
+        if (elapsed < SHOOT_ONE_DURATION_TICKS)
+        {
+            return;
+        }
+        manualBurstOn = 0;
+    }
+    // 已经启动过拨弹时，必须等满间隔；不能补发积压的请求。
+    if (manualBurstHasStarted)
+    {
+        // 冷却未满时维持停止，快速松开重按也不能提前启动。
+        if (elapsed < MANUAL_BURST_MIN_INTERVAL_TICKS)
+        {
+            return;
+        }
+    }
+    manualBurstLastStartTime = now;
+    manualBurstHasStarted = 1;
+    manualBurstOn = 1;
+}
+
 //拨弹轮状态机
 void static triggerModeChange(void)
 {
@@ -233,6 +290,7 @@ void static triggerModeChange(void)
     if(!fricOn) 
     {
         triggerMode = TriggerMode_e_Stop;
+        manualBurstOn = 0;
         return;
     }
 	
@@ -297,12 +355,11 @@ void static triggerModeChange(void)
             break;
             
         case TriggerMode_e_ShootMulti:
-            // 连发状态下，摇杆离开连发区间就停止
-            if(wheel <= 400)  // 摇杆离开连发区间
+            // 两种手瞄连发请求都已释放，立即停下；不在冷却后自动补发。
+            if (!manualBurstRequested())
             {
                 triggerMode = TriggerMode_e_Stop;
             }
-            // 否则保持连发状态
             break;
             
         case TriggerMode_e_StuckSolve:
@@ -318,6 +375,16 @@ void static triggerModeChange(void)
             triggerMode = TriggerMode_e_Stop;
             break;
     }
+
+    // 连发模式只更新有限时长的拨弹脉冲；其他模式清掉脉冲但保留上次启动时间。
+    if (triggerMode == TriggerMode_e_ShootMulti)
+    {
+        updateManualBurst(currentTick);
+    }
+    else
+    {
+        manualBurstOn = 0;
+    }
 }
 
 static void initShootModes(void)
@@ -328,6 +395,9 @@ static void initShootModes(void)
 	triggerMode=TriggerMode_e_Stop;
     autoFireLastStartTime = 0;
     autoFireHasStarted = 0;
+    manualBurstLastStartTime = 0;
+    manualBurstHasStarted = 0;
+    manualBurstOn = 0;
 }
 
 //速度设置
@@ -344,9 +414,14 @@ void setSpeed(void)
 		wantedVShootMotor[1] = 0;
 	}
 	
-	if(triggerMode==TriggerMode_e_ShootOne || triggerMode==TriggerMode_e_ShootMulti)
+	if(triggerMode==TriggerMode_e_ShootOne)
 	{
 		triggerOn=1;
+	}
+	// 手瞄连发在200 ms周期内只执行一次41 ms拨弹，其余时间目标速度为0。
+	else if(triggerMode==TriggerMode_e_ShootMulti)
+	{
+		triggerOn=manualBurstOn;
 	}
 	else if(triggerMode==TriggerMode_e_StuckSolve)
 	{

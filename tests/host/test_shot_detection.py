@@ -96,7 +96,7 @@ int main(int argc, char **argv)
     sample(370, 8000);
     assert(shotDetection.count == 1 && shotDetection.flag == 0);
     sample(375, 8200);
-    assert(shotDetection.count == 1); /* 没恢复前不能重复触发。 */
+    assert(shotDetection.count == 1); /* 局部回升只重新允许检测，不产生事件。 */
     sample(380, 8400);
     sample(385, 8100);
     assert(shotDetection.count == 2);
@@ -127,6 +127,38 @@ int main(int argc, char **argv)
     assert(!shot_detector_update(&detector, NAN, 1, 110) && !detector.ready);
     assert(!shot_detector_update(&detector, INFINITY, 1, 115));
     assert(!shot_detector_update(&detector, 6000, 1, 120));
+
+    /* 三次下凹的峰值一直低于原8400基线，仍能根据局部回升分别检测。 */
+    shot_detector_reset(&detector);
+    for (unsigned ms = 0; ms <= 100; ms += 5)
+        assert(!shot_detector_update(&detector, 8400, 1, ms));
+    const float burst[] = {8100, 7900, 8050, 8200, 8000, 7800, 7950, 8100, 7800};
+    const unsigned expected[] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    unsigned burst_events = 0;
+    for (unsigned i = 0; i < sizeof(burst)/sizeof(burst[0]); ++i) {
+        unsigned event = shot_detector_update(&detector, burst[i], 1, 105 + i*5);
+        assert(event == expected[i]);
+        burst_events += event;
+    }
+    assert(burst_events == 3);
+    /* 连发负载掉到7000以下也继续跟踪，最低转速限制只用于开轮准备。 */
+    shot_detector_reset(&detector);
+    for (unsigned ms = 0; ms <= 100; ms += 5)
+        assert(!shot_detector_update(&detector, 8400, 1, ms));
+    assert(shot_detector_update(&detector, 6800, 1, 105));
+    assert(!shot_detector_update(&detector, 6500, 1, 110));
+    assert(!shot_detector_update(&detector, 6650, 1, 115));
+    assert(!shot_detector_update(&detector, 6800, 1, 120));
+    assert(shot_detector_update(&detector, 6500, 1, 125));
+    assert(detector.ready);
+    assert(!shot_detector_update(&detector, 6400, 0, 130) && !detector.ready);
+    /* 一次下凹内的小回弹不能反复计数。 */
+    for (unsigned ms = 0; ms <= 100; ms += 5)
+        assert(!shot_detector_update(&detector, 8400, 1, 200+ms));
+    assert(shot_detector_update(&detector, 8000, 1, 305));
+    for (unsigned i = 0; i < 20; ++i)
+        assert(!shot_detector_update(&detector, 8000 + (i%2)*100, 1, 310+i*5));
+
     /* 稳定计时和50 ms显示脉冲均跨uint32回绕。 */
     shot_detector_reset(&shotDetector);
     memset(&shotDetection, 0, sizeof(shotDetection));
@@ -141,7 +173,7 @@ int main(int argc, char **argv)
     for (unsigned ms = 0; ms <= 100; ms += 5)
         assert(!shot_detector_update(&detector, 8400, 1, start + ms));
     assert(detector.ready && shot_detector_update(&detector, 8100, 1, start + 105U));
-    puts("PASS: raw wheel RPM / startup and shutdown / immediate drop event / recovery rearm / no duplicate / 50ms flag / cumulative count / read-only atomic snapshot / invalid samples / integer and time wrap");
+    puts("PASS: raw wheel RPM / startup and shutdown / immediate drop event / local rebound and repeated low-speed drops / no duplicate / 50ms flag / cumulative count / read-only atomic snapshot / invalid samples / integer and time wrap");
 }
 '''
     (OUT / 'test.c').write_text(prefix + functions + tests, encoding='utf-8')

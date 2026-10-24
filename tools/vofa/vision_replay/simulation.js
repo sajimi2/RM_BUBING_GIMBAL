@@ -19,13 +19,13 @@ function randomInteger(random, minimum, maximum) {
 
 function validateScales(yawScale, pitchScale, sampleMs) {
     if (!isFinite(yawScale) || yawScale < 0 || yawScale > 1)
-        return "Yaw比例应在0～1之间";
+        return "左右摆动幅度请填0～1";
     if (!isFinite(pitchScale) || pitchScale < 0 || pitchScale > 1)
-        return "Pitch比例应在0～1之间";
+        return "上下摆动幅度请填0～1";
     if (yawScale === 0 && pitchScale === 0)
-        return "至少开启一个轴";
+        return "左右和上下幅度不能同时为0";
     if (!isFinite(sampleMs) || sampleMs < 5 || sampleMs > 100)
-        return "记录周期应在5～100 ms之间";
+        return "原记录每行间隔请填5～100毫秒";
     return "";
 }
 
@@ -93,15 +93,15 @@ function validateOptions(options) {
     if (error !== "")
         return error;
     if (!isFinite(options.seed) || options.seed !== Math.floor(options.seed))
-        return "种子必须是0～4294967295之间的整数";
+        return "轨迹编号请填0～4294967295之间的整数";
     if (options.seed < 0 || options.seed > 4294967295)
-        return "种子必须是0～4294967295之间的整数";
+        return "轨迹编号请填0～4294967295之间的整数";
     if (!isFinite(options.seconds) || options.seconds < 1 || options.seconds > 120)
         return "模拟时长应在1～120秒之间";
     if (!isFinite(options.yawLimit) || options.yawLimit <= 0 || options.yawLimit > 90)
-        return "Yaw最大偏移应大于0且不超过90°";
+        return "左右偏离范围请填大于0、不超过90度的数";
     if (!isFinite(options.pitchLimit) || options.pitchLimit <= 0 || options.pitchLimit > 20)
-        return "Pitch最大偏移应大于0且不超过20°";
+        return "上下偏离范围请填大于0、不超过20度的数";
     return "";
 }
 
@@ -201,7 +201,7 @@ function generate(recording, legacyRecording, options) {
     if (legacy.error !== "")
         return legacy;
     if (paired.yaw.length < 45 || legacy.yaw.length < 45)
-        return {error: "训练片段太短，至少需要约2秒连续记录"};
+        return {error: "可用记录太短，至少需要约2秒的连续记录"};
     var random = {state: options.seed >>> 0};
     var trajectory = {error: "", yaw: [0], pitch: [0], sampleMs: sendMs,
                       durationMs: options.seconds * 1000, seed: options.seed, kind: "synthetic",
@@ -223,7 +223,7 @@ function generate(recording, legacyRecording, options) {
                 break;
         }
         if (block === null)
-            return {error: "偏移范围过小，无法拼接；请减小幅度比例或增大最大偏移"};
+            return {error: "摆动放不进设定范围，请减小摆动幅度，或在高级设置中放宽偏离范围"};
         trajectory.chunks.push({firstFrame: trajectory.yaw.length, source: block.source,
                                sourceStart: block.sourceStart, pitchStart: block.pitchStart,
                                frames: block.yaw.length, yawGain: block.yawGain,

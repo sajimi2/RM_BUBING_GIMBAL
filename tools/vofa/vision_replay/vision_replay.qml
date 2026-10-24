@@ -27,7 +27,7 @@ ResizableRectangle {
     property double lastTickAt: 0
     property double lastDataAt: 0
     property string lastRunManifest: ""
-    property string status: "右键分别绑定Yaw实际角I2、Pitch实际角I0，遥控器进入自瞄"
+    property string status: "尚未开始；遥控切到自瞄后点开始。"
     property Item ref: Loader {
         active: false
         sourceComponent: Component {
@@ -110,15 +110,12 @@ ResizableRectangle {
             var error = Sim.validateOptions(settings(previewSeed));
             if (error !== "")
                 return error;
-            return "模拟" + secondsInput.text + "秒；两轴同帧发送，开始后显示实际种子和轨迹标识";
+            return "这一轮运行 " + secondsInput.text + " 秒。";
         }
         var value = buildTrajectory(Number(seedInput.text));
         if (value.error !== "")
             return value.error;
-        var range = Sim.bounds(value);
-        return "约" + (value.durationMs / 1000).toFixed(2) + "秒；Yaw偏移" + range.yawMin.toFixed(2)
-                + "～" + range.yawMax.toFixed(2) + "°；Pitch偏移" + range.pitchMin.toFixed(2)
-                + "～" + range.pitchMax.toFixed(2) + "°";
+        return "这段记录约 " + (value.durationMs / 1000).toFixed(1) + " 秒，播放一次后停止。";
     }
 
     function sendTarget(point) {
@@ -160,7 +157,7 @@ ResizableRectangle {
             }
         }
         if (Date.now() - lastDataAt > 500) {
-            status = "没有新遥测，停止启动";
+            status = "没有收到新数据，请检查串口和上传开关。";
             return;
         }
         var seed = Number(seedInput.text);
@@ -173,7 +170,7 @@ ResizableRectangle {
         }
         if (modeInput.currentIndex !== 2) {
             if (!Sim.pitchAllowed(next, pitch, Dual.recording.pitchLimitsDeg)) {
-                status = "预计Pitch越过限位，请调整初始姿态或减小Pitch比例；未发送";
+                status = "上下摆动会超过限位，请调整起始角度或减小上下幅度。尚未开始。";
                 return;
             }
         }
@@ -202,7 +199,7 @@ ResizableRectangle {
         startedAt = Date.now() + 42;
         lastTickAt = Date.now();
         replaying = true;
-        status = "已请求启动；查看I1/I3目标角。轨迹标识 " + Sim.fingerprint(next);
+        status = "正在开始，请观察目标角曲线。";
     }
 
     function stop(message) {
@@ -223,7 +220,7 @@ ResizableRectangle {
             }
             // 卡顿或时钟回退后停止，不成串补发过期指令。
             if (now - root.lastTickAt > 200 || now < root.lastTickAt) {
-                root.stop("发送调度中断，请重新开始本轮");
+                root.stop("电脑发送卡顿，已停止，请重新开始。");
                 return;
             }
             root.lastTickAt = now;
@@ -236,9 +233,8 @@ ResizableRectangle {
                 root.stop("本轮完成，保持最后目标；退出自瞄请用遥控器");
                 return;
             }
-            root.status = "发送 " + (elapsed / 1000).toFixed(1) + " / "
-                    + (root.trajectory.durationMs / 1000).toFixed(1) + "秒；Yaw " + point.yaw.toFixed(2)
-                    + "°，Pitch " + point.pitch.toFixed(2) + "°";
+            root.status = "正在运行：" + (elapsed / 1000).toFixed(1) + " / "
+                    + (root.trajectory.durationMs / 1000).toFixed(1) + " 秒";
         }
     }
 
@@ -250,9 +246,9 @@ ResizableRectangle {
         ColumnLayout {
             width: scroller.availableWidth
             spacing: 10
-            Label { text: "视觉双轴重播 / 种子模拟"; font.bold: true; font.pixelSize: g_settings.applyVScale(26) }
+            Label { text: "视觉指令模拟"; font.bold: true; font.pixelSize: g_settings.applyVScale(26) }
             Label {
-                text: "只瞄准，不发射；双轴模式需要支持aim命令的新固件"
+                text: "让云台按记录运动，或生成一条新轨迹。只瞄准，不发射。"
                 font.pixelSize: g_settings.applyVScale(18)
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -261,10 +257,10 @@ ResizableRectangle {
                 columns: 2
                 Layout.fillWidth: true
                 enabled: !root.replaying
-                Label { text: "模式"; font.pixelSize: g_settings.applyVScale(20) }
+                Label { text: "怎么模拟"; font.pixelSize: g_settings.applyVScale(20) }
                 ComboBox {
                     id: modeInput
-                    model: ["本次双轴实录", "双轴种子模拟", "上次Yaw基准（保持Pitch）"]
+                    model: ["重播这次记录（左右＋上下）", "随机生成一轮（左右＋上下）", "重播上次记录（只动左右）"]
                     currentIndex: root.replayMode
                     onCurrentIndexChanged: {
                         root.replayMode = currentIndex;
@@ -272,17 +268,18 @@ ResizableRectangle {
                     Layout.fillWidth: true
                     font.pixelSize: g_settings.applyVScale(20)
                 }
-                Label { text: "重播片段"; visible: modeInput.currentIndex !== 1; font.pixelSize: g_settings.applyVScale(20) }
+                Label { text: "播放哪一段"; visible: modeInput.currentIndex !== 1; font.pixelSize: g_settings.applyVScale(20) }
                 ComboBox {
                     id: profileInput
-                    model: Dual.recording.profiles
-                    // 绑定表达式只选择数据，不运行发送或生成逻辑。
+                    // 显示名称与数据分开，顺序仍对应原记录片段，不改采样范围。
                     Component.onCompleted: updateModel()
                     function updateModel() {
-                        if (modeInput.currentIndex === 2)
-                            model = Data.recording.profiles;
-                        else
-                            model = Dual.recording.profiles;
+                        // 上次记录的三个选项，仍按原有顺序对应数据。
+                        if (modeInput.currentIndex === 2) {
+                            model = ["完整记录", "开头一段", "变化密集的一段"];
+                        } else {
+                            model = ["常用片段", "另一段（用于复查参数）", "完整记录（含开头大跳变）"];
+                        }
                     }
                     Connections {
                         target: modeInput
@@ -291,42 +288,122 @@ ResizableRectangle {
                             profileInput.currentIndex = 0;
                         }
                     }
-                    textRole: "name"
                     visible: modeInput.currentIndex !== 1
                     Layout.fillWidth: true
                     font.pixelSize: g_settings.applyVScale(20)
                 }
-                Label { text: "Yaw幅度比例（0～1）"; font.pixelSize: g_settings.applyVScale(20) }
+                Label { text: "左右摆动幅度"; font.pixelSize: g_settings.applyVScale(20) }
                 TextField { id: scaleInput; text: root.amplitudeScale.toString(); Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(22) }
-                Label { text: "Pitch幅度比例（0～1）"; visible: modeInput.currentIndex !== 2; font.pixelSize: g_settings.applyVScale(20) }
+                Label { text: "上下摆动幅度"; visible: modeInput.currentIndex !== 2; font.pixelSize: g_settings.applyVScale(20) }
                 TextField { id: pitchScaleInput; text: root.pitchScale.toString(); visible: modeInput.currentIndex !== 2; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(22) }
-                Label { text: "记录周期估计（ms）"; font.pixelSize: g_settings.applyVScale(20) }
-                TextField { id: periodInput; text: root.sampleMs.toString(); Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(22) }
-                Label { text: "模拟时长（秒）"; visible: modeInput.currentIndex === 1; font.pixelSize: g_settings.applyVScale(20) }
+                Label { text: "运行多久（秒）"; visible: modeInput.currentIndex === 1; font.pixelSize: g_settings.applyVScale(20) }
                 TextField { id: secondsInput; text: root.seconds.toString(); visible: modeInput.currentIndex === 1; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(22) }
-                Label { text: "固定种子"; visible: modeInput.currentIndex === 1; font.pixelSize: g_settings.applyVScale(20) }
-                TextField { id: seedInput; text: root.seedValue.toString(); visible: modeInput.currentIndex === 1; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(22) }
-                Label { text: "每轮自动换种子"; visible: modeInput.currentIndex === 1; font.pixelSize: g_settings.applyVScale(20) }
-                CheckBox { id: autoSeedInput; checked: root.randomSeed; visible: modeInput.currentIndex === 1 }
-                Label { text: "Yaw最大偏移（±°）"; visible: modeInput.currentIndex === 1; font.pixelSize: g_settings.applyVScale(20) }
-                TextField { id: yawLimitInput; text: root.yawLimit.toString(); visible: modeInput.currentIndex === 1; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(22) }
-                Label { text: "Pitch最大偏移（±°）"; visible: modeInput.currentIndex === 1; font.pixelSize: g_settings.applyVScale(20) }
-                TextField { id: pitchLimitInput; text: root.pitchLimit.toString(); visible: modeInput.currentIndex === 1; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(22) }
             }
-            Label { text: root.preview(); wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(18) }
-            RowLayout {
-                Button { text: "开始发送"; enabled: !root.replaying; font.pixelSize: g_settings.applyVScale(20); onClicked: root.start() }
-                Button { text: "停止发送"; enabled: root.replaying; font.pixelSize: g_settings.applyVScale(20); onClicked: root.stop("已停止，保持最后目标") }
-            }
-            Label { text: root.status; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(18) }
-            Label { text: "本轮配置（可选中复制，含种子和轨迹标识）"; font.pixelSize: g_settings.applyVScale(16) }
-            TextArea { text: root.lastRunManifest; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(15) }
             Label {
-                text: "约24Hz发送，起点平移到当前实际角。20ms是记录周期估计，没有硬件时间戳。固定种子对照参数，换种子检验泛化；独立留出段不参与生成。"
+                text: "幅度填 0～1：1 = 原幅度，0.5 = 一半，0 = 这一轴不动。"
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
                 font.pixelSize: g_settings.applyVScale(17)
                 color: "#4c6075"
+            }
+            CheckBox {
+                id: autoSeedInput
+                text: "每次开始都换一条新轨迹"
+                checked: root.randomSeed
+                visible: modeInput.currentIndex === 1
+                enabled: !root.replaying
+                font.pixelSize: g_settings.applyVScale(20)
+            }
+            GridLayout {
+                columns: 2
+                Layout.fillWidth: true
+                visible: modeInput.currentIndex === 1 && !autoSeedInput.checked
+                enabled: !root.replaying
+                Label { text: "轨迹编号"; font.pixelSize: g_settings.applyVScale(20) }
+                TextField { id: seedInput; text: root.seedValue.toString(); Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(22) }
+            }
+            Label {
+                text: "想重复刚才那一轮？取消勾选，保留轨迹编号和其他设置，再点开始。"
+                visible: modeInput.currentIndex === 1
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                font.pixelSize: g_settings.applyVScale(17)
+                color: "#4c6075"
+            }
+            Label { text: root.preview(); wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(18) }
+            RowLayout {
+                Button { text: "开始"; enabled: !root.replaying; font.pixelSize: g_settings.applyVScale(20); onClicked: root.start() }
+                Button { text: "停止"; enabled: root.replaying; font.pixelSize: g_settings.applyVScale(20); onClicked: root.stop("已停止，保持最后目标。退出自瞄请用遥控器。") }
+            }
+            Label { text: root.status; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(18) }
+            Label {
+                text: "从当前角度开始。停止后保持最后目标，退出自瞄请用遥控器。"
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                font.pixelSize: g_settings.applyVScale(17)
+                color: "#4c6075"
+            }
+            ToolButton {
+                id: advancedToggle
+                text: {
+                    // 展开后给出收起提示，避免用户不知道这一行可以点击。
+                    if (checked)
+                        return "▾ 首次使用 / 高级设置";
+                    return "▸ 首次使用 / 高级设置";
+                }
+                checkable: true
+                checked: false
+                font.pixelSize: g_settings.applyVScale(18)
+            }
+            ColumnLayout {
+                visible: advancedToggle.checked
+                Layout.fillWidth: true
+                spacing: 10
+                Label {
+                    text: "首次使用：在控件背景右键，把Yaw实际角绑定到I2、Pitch实际角绑定到I0。两个通道都用增益1、偏置0。"
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                    font.pixelSize: g_settings.applyVScale(17)
+                }
+                GridLayout {
+                    columns: 2
+                    Layout.fillWidth: true
+                    enabled: !root.replaying
+                    Label { text: "原记录每行间隔（毫秒）"; font.pixelSize: g_settings.applyVScale(18) }
+                    TextField { id: periodInput; text: root.sampleMs.toString(); Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(20) }
+                    Label { text: "左右最多偏离起点（±度）"; visible: modeInput.currentIndex === 1; font.pixelSize: g_settings.applyVScale(18) }
+                    TextField { id: yawLimitInput; text: root.yawLimit.toString(); visible: modeInput.currentIndex === 1; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(20) }
+                    Label { text: "上下最多偏离起点（±度）"; visible: modeInput.currentIndex === 1; font.pixelSize: g_settings.applyVScale(18) }
+                    TextField { id: pitchLimitInput; text: root.pitchLimit.toString(); visible: modeInput.currentIndex === 1; Layout.fillWidth: true; font.pixelSize: g_settings.applyVScale(20) }
+                }
+                Label {
+                    text: "原记录没有时间戳，目前按每行20毫秒估计；不确定就保持原值。这不是向板子发送指令的间隔。"
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                    font.pixelSize: g_settings.applyVScale(17)
+                    color: "#4c6075"
+                }
+                ToolButton {
+                    id: detailsToggle
+                    text: {
+                        // 详细数据只在需要复制时显示，保持常用操作区域简洁。
+                        if (checked)
+                            return "▾ 本轮详细记录（可复制）";
+                        return "▸ 查看本轮详细记录（可复制）";
+                    }
+                    checkable: true
+                    checked: false
+                    font.pixelSize: g_settings.applyVScale(17)
+                }
+                TextArea {
+                    text: root.lastRunManifest
+                    visible: detailsToggle.checked
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: TextEdit.Wrap
+                    Layout.fillWidth: true
+                    font.pixelSize: g_settings.applyVScale(15)
+                }
             }
         }
     }
